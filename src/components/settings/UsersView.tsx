@@ -11,7 +11,9 @@ import {
   UserCheck,
   UserX,
   ShieldAlert,
-  Loader2
+  Loader2,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 import { store } from '../../services/store';
 import { User, UserRole, UserStatus, UserPermissions, PermissionModule } from '../../types';
@@ -33,6 +35,7 @@ const MODULE_DEFINITIONS: { id: PermissionModule; label: string; actions: string
 
 export const UsersView: React.FC = () => {
   const [search, setSearch] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [resetPassUser, setResetPassUser] = useState<User | null>(null);
@@ -61,6 +64,59 @@ export const UsersView: React.FC = () => {
     u.username.toLowerCase().includes(search.toLowerCase()) ||
     u.email.toLowerCase().includes(search.toLowerCase())
   );
+
+  const isAllSelected = filtered.length > 0 && filtered.every(u => selectedIds.includes(u.id));
+
+  const handleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filtered.map(u => u.id));
+    }
+  };
+
+  const handleSelectOne = (id: string) => {
+    setSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleDeleteOne = async (id: string, name: string) => {
+    if (!canDeleteUsers) {
+      setPermissionError('Permission denied: Admin authority required to delete user accounts');
+      return;
+    }
+    if (confirm(`Are you sure you want to delete user account "${name}"?`)) {
+      const res = await store.deleteUser(id);
+      if (!res.success) {
+        setPermissionError(res.error || 'Failed to delete user account');
+      } else {
+        setSelectedIds(prev => prev.filter(item => item !== id));
+      }
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (!canDeleteUsers) return;
+    if (selectedIds.length === 0) return;
+    if (confirm(`Are you sure you want to delete ${selectedIds.length} selected user account(s)?`)) {
+      const res = await store.bulkDeleteUsers(selectedIds);
+      if (res.success) {
+        setSelectedIds([]);
+      } else {
+        setPermissionError(res.error || 'Failed to bulk delete users');
+      }
+    }
+  };
+
+  const handleBulkStatus = async (newStatus: UserStatus) => {
+    if (!canManageUsers) return;
+    if (selectedIds.length === 0) return;
+    const res = await store.bulkUpdateUserStatus(selectedIds, newStatus);
+    if (!res.success) {
+      setPermissionError(res.error || 'Failed to bulk update user status');
+    }
+  };
 
   const handleOpenAdd = () => {
     if (!canAddUsers) {
@@ -215,6 +271,45 @@ export const UsersView: React.FC = () => {
         </div>
       )}
 
+      {/* Bulk Operations Toolbar */}
+      {selectedIds.length > 0 && (
+        <div className="bg-amber-950/40 border border-amber-800/80 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg">
+          <div className="flex items-center gap-2 text-amber-300 font-semibold text-xs">
+            <CheckSquare className="w-4 h-4 text-amber-400" />
+            <span>{selectedIds.length} user account(s) selected</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {canManageUsers && (
+              <>
+                <button
+                  onClick={() => handleBulkStatus('active')}
+                  className="px-3 py-1.5 bg-emerald-900/60 hover:bg-emerald-900 text-emerald-200 border border-emerald-700/60 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Set Active</span>
+                </button>
+                <button
+                  onClick={() => handleBulkStatus('inactive')}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <UserX className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Set Inactive</span>
+                </button>
+              </>
+            )}
+            {canDeleteUsers && (
+              <button
+                onClick={handleBulkDelete}
+                className="px-3 py-1.5 bg-rose-900/60 hover:bg-rose-900 text-rose-200 border border-rose-700/60 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                <span>Bulk Delete ({selectedIds.length})</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* User List Table */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -239,6 +334,14 @@ export const UsersView: React.FC = () => {
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-800/80 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800">
               <tr>
+                <th className="py-3 px-4 font-semibold w-10">
+                  <button 
+                    onClick={handleSelectAll}
+                    className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                  >
+                    {isAllSelected ? <CheckSquare className="w-4 h-4 text-amber-400" /> : <Square className="w-4 h-4" />}
+                  </button>
+                </th>
                 <th className="py-3 px-4 font-semibold">User Profile</th>
                 <th className="py-3 px-4 font-semibold">Username / Auth UID</th>
                 <th className="py-3 px-4 font-semibold text-center">Role</th>
@@ -248,8 +351,18 @@ export const UsersView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 text-slate-300">
-              {filtered.map(u => (
-                <tr key={u.id} className="hover:bg-slate-800/40 transition-colors">
+              {filtered.map(u => {
+                const isSelected = selectedIds.includes(u.id);
+                return (
+                  <tr key={u.id} className={`hover:bg-slate-800/40 transition-colors ${isSelected ? 'bg-amber-500/5' : ''}`}>
+                    <td className="py-3.5 px-4">
+                      <button 
+                        onClick={() => handleSelectOne(u.id)}
+                        className="text-slate-400 hover:text-amber-400 transition-colors cursor-pointer"
+                      >
+                        {isSelected ? <CheckSquare className="w-4 h-4 text-amber-400" /> : <Square className="w-4 h-4" />}
+                      </button>
+                    </td>
                   <td className="py-3.5 px-4">
                     <div className="font-bold text-white text-sm">{u.fullName}</div>
                     <div className="text-[11px] text-slate-400">{u.email}</div>
@@ -313,7 +426,8 @@ export const UsersView: React.FC = () => {
                     </div>
                   </td>
                 </tr>
-              ))}
+              );
+            })}
             </tbody>
           </table>
         </div>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CreditCard, Search, ShieldAlert, CheckCircle2, Clock, Filter, FileText } from 'lucide-react';
+import { CreditCard, Search, ShieldAlert, CheckCircle2, Clock, Filter, FileText, CheckSquare, Square, Trash2 } from 'lucide-react';
 import { store } from '../../services/store';
 import { CentralPayment, CentralPaymentStatus } from '../../types';
 
@@ -11,6 +11,7 @@ export const PaymentsMasterView: React.FC<PaymentsMasterViewProps> = ({ initialF
   const [activeTab, setActiveTab] = useState<'All' | 'Pending' | 'Approved' | 'Paid'>(initialFilter);
   const [search, setSearch] = useState('');
   const [selectedType, setSelectedType] = useState<string>('All');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [permissionError, setPermissionError] = useState<string | null>(null);
 
   const payments = store.getPayments();
@@ -29,6 +30,62 @@ export const PaymentsMasterView: React.FC<PaymentsMasterViewProps> = ({ initialF
     if (activeTab === 'Paid') return matchesSearch && matchesType && p.status === 'Paid';
     return matchesSearch && matchesType;
   });
+
+  const isAllSelected = filtered.length > 0 && filtered.every(p => selectedIds.includes(p.id));
+
+  const handleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filtered.map(p => p.id));
+    }
+  };
+
+  const handleSelectOne = (id: string) => {
+    setSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleDeleteOne = async (id: string, paymentIdStr: string) => {
+    if (!canApprove) {
+      setPermissionError('Permission denied: Account cannot delete payment records');
+      return;
+    }
+    if (confirm(`Are you sure you want to delete payment record ${paymentIdStr}?`)) {
+      const res = await store.deletePayment(id);
+      if (!res.success) {
+        setPermissionError(res.error || 'Failed to delete payment record');
+      } else {
+        setSelectedIds(prev => prev.filter(item => item !== id));
+      }
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (!canApprove) return;
+    if (selectedIds.length === 0) return;
+    if (confirm(`Are you sure you want to delete ${selectedIds.length} selected payment record(s)?`)) {
+      const res = await store.bulkDeletePayments(selectedIds);
+      if (res.success) {
+        setSelectedIds([]);
+      } else {
+        setPermissionError(res.error || 'Failed to bulk delete payments');
+      }
+    }
+  };
+
+  const handleBulkStatus = async (nextStatus: CentralPaymentStatus) => {
+    if (!canApprove) {
+      setPermissionError('Permission denied: Account cannot approve or disburse payments');
+      return;
+    }
+    if (selectedIds.length === 0) return;
+    const res = await store.bulkUpdatePaymentStatus(selectedIds, nextStatus);
+    if (!res.success) {
+      setPermissionError(res.error || 'Failed to bulk update payment status');
+    }
+  };
 
   const handleUpdateStatus = (payment: CentralPayment, nextStatus: CentralPaymentStatus) => {
     if ((nextStatus === 'Approved' || nextStatus === 'Paid') && !canApprove) {
@@ -96,6 +153,43 @@ export const PaymentsMasterView: React.FC<PaymentsMasterViewProps> = ({ initialF
         })}
       </div>
 
+      {/* Bulk Operations Toolbar */}
+      {selectedIds.length > 0 && (
+        <div className="bg-emerald-950/40 border border-emerald-800/80 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg">
+          <div className="flex items-center gap-2 text-emerald-300 font-semibold text-xs">
+            <CheckSquare className="w-4 h-4 text-emerald-400" />
+            <span>{selectedIds.length} payment record(s) selected</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {canApprove && (
+              <>
+                <button
+                  onClick={() => handleBulkStatus('Approved')}
+                  className="px-3 py-1.5 bg-sky-900/60 hover:bg-sky-900 text-sky-200 border border-sky-700/60 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Bulk Approve</span>
+                </button>
+                <button
+                  onClick={() => handleBulkStatus('Paid')}
+                  className="px-3 py-1.5 bg-emerald-900/60 hover:bg-emerald-900 text-emerald-200 border border-emerald-700/60 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <CreditCard className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Bulk Execute Payment</span>
+                </button>
+                <button
+                  onClick={handleBulkDelete}
+                  className="px-3 py-1.5 bg-rose-900/60 hover:bg-rose-900 text-rose-200 border border-rose-700/60 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Bulk Delete ({selectedIds.length})</span>
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Toolbar */}
       <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3">
         <div className="relative w-full sm:w-72">
@@ -132,6 +226,14 @@ export const PaymentsMasterView: React.FC<PaymentsMasterViewProps> = ({ initialF
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-800/80 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800">
               <tr>
+                <th className="py-3 px-4 font-semibold w-10">
+                  <button 
+                    onClick={handleSelectAll}
+                    className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                  >
+                    {isAllSelected ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4" />}
+                  </button>
+                </th>
                 <th className="py-3 px-4 font-semibold">Payment ID</th>
                 <th className="py-3 px-4 font-semibold">Module Type</th>
                 <th className="py-3 px-4 font-semibold">Recipient</th>
@@ -143,63 +245,84 @@ export const PaymentsMasterView: React.FC<PaymentsMasterViewProps> = ({ initialF
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 text-slate-300">
-              {filtered.map(p => (
-                <tr key={p.id} className="hover:bg-slate-800/40 transition-colors">
-                  <td className="py-3.5 px-4 font-mono font-bold text-emerald-400">{p.paymentId}</td>
-                  <td className="py-3.5 px-4 font-semibold text-amber-300">{p.paymentType}</td>
-                  <td className="py-3.5 px-4 font-bold text-white">{p.recipient}</td>
-                  <td className="py-3.5 px-4 text-slate-300">{p.reference}</td>
-                  <td className="py-3.5 px-4 text-right font-mono font-bold text-white text-sm">${p.amount.toFixed(2)}</td>
-                  <td className="py-3.5 px-4 text-center font-mono text-slate-400">{p.dueDate}</td>
-                  <td className="py-3.5 px-4 text-center">
-                    <span className={`inline-block px-2.5 py-0.5 rounded text-[10px] font-bold uppercase ${
-                      p.status === 'Paid'
-                        ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
-                        : p.status === 'Approved'
-                        ? 'bg-sky-950 text-sky-300 border border-sky-800'
-                        : p.status === 'Pending Approval'
-                        ? 'bg-amber-950 text-amber-300 border border-amber-800'
-                        : 'bg-rose-950 text-rose-300 border border-rose-800'
-                    }`}>
-                      {p.status}
-                    </span>
-                  </td>
-                  <td className="py-3.5 px-4 text-right">
-                    <div className="flex items-center justify-end gap-1.5">
-                      {p.status === 'Unpaid' && (
-                        <button
-                          onClick={() => handleUpdateStatus(p, 'Pending Approval')}
-                          className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold rounded-lg border border-amber-500/40 transition-colors"
-                        >
-                          Submit Approval
-                        </button>
-                      )}
+              {filtered.map(p => {
+                const isSelected = selectedIds.includes(p.id);
+                return (
+                  <tr key={p.id} className={`hover:bg-slate-800/40 transition-colors ${isSelected ? 'bg-emerald-500/5' : ''}`}>
+                    <td className="py-3.5 px-4">
+                      <button 
+                        onClick={() => handleSelectOne(p.id)}
+                        className="text-slate-400 hover:text-emerald-400 transition-colors cursor-pointer"
+                      >
+                        {isSelected ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4" />}
+                      </button>
+                    </td>
+                    <td className="py-3.5 px-4 font-mono font-bold text-emerald-400">{p.paymentId}</td>
+                    <td className="py-3.5 px-4 font-semibold text-amber-300">{p.paymentType}</td>
+                    <td className="py-3.5 px-4 font-bold text-white">{p.recipient}</td>
+                    <td className="py-3.5 px-4 text-slate-300">{p.reference}</td>
+                    <td className="py-3.5 px-4 text-right font-mono font-bold text-white text-sm">${p.amount.toFixed(2)}</td>
+                    <td className="py-3.5 px-4 text-center font-mono text-slate-400">{p.dueDate}</td>
+                    <td className="py-3.5 px-4 text-center">
+                      <span className={`inline-block px-2.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                        p.status === 'Paid'
+                          ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                          : p.status === 'Approved'
+                          ? 'bg-sky-950 text-sky-300 border border-sky-800'
+                          : p.status === 'Pending Approval'
+                          ? 'bg-amber-950 text-amber-300 border border-amber-800'
+                          : 'bg-rose-950 text-rose-300 border border-rose-800'
+                      }`}>
+                        {p.status}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-4 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {p.status === 'Unpaid' && (
+                          <button
+                            onClick={() => handleUpdateStatus(p, 'Pending Approval')}
+                            className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold rounded-lg border border-amber-500/40 transition-colors"
+                          >
+                            Submit Approval
+                          </button>
+                        )}
 
-                      {p.status === 'Pending Approval' && (
-                        <button
-                          onClick={() => handleUpdateStatus(p, 'Approved')}
-                          className="px-2.5 py-1 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold rounded-lg transition-colors"
-                        >
-                          Approve Payment
-                        </button>
-                      )}
+                        {p.status === 'Pending Approval' && (
+                          <button
+                            onClick={() => handleUpdateStatus(p, 'Approved')}
+                            className="px-2.5 py-1 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold rounded-lg transition-colors"
+                          >
+                            Approve Payment
+                          </button>
+                        )}
 
-                      {p.status === 'Approved' && (
-                        <button
-                          onClick={() => handleUpdateStatus(p, 'Paid')}
-                          className="px-2.5 py-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg transition-colors"
-                        >
-                          Execute Payment
-                        </button>
-                      )}
+                        {p.status === 'Approved' && (
+                          <button
+                            onClick={() => handleUpdateStatus(p, 'Paid')}
+                            className="px-2.5 py-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg transition-colors"
+                          >
+                            Execute Payment
+                          </button>
+                        )}
 
-                      {p.status === 'Paid' && (
-                        <span className="text-[10px] text-slate-500 font-mono italic">Disbursed</span>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                        {p.status === 'Paid' && (
+                          <span className="text-[10px] text-slate-500 font-mono italic">Disbursed</span>
+                        )}
+
+                        {canApprove && (
+                          <button
+                            onClick={() => handleDeleteOne(p.id, p.paymentId)}
+                            className="p-1 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 ml-1 cursor-pointer"
+                            title="Delete Payment Record"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

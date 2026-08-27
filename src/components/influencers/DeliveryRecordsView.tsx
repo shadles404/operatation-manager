@@ -9,7 +9,10 @@ import {
   Clock,
   ShieldAlert,
   Trash2,
-  Edit2
+  Edit2,
+  CheckSquare,
+  Square,
+  XCircle
 } from 'lucide-react';
 import { store } from '../../services/store';
 import { DeliveryRecord, DeliveryStatus, DeliveryPaymentStatus } from '../../types';
@@ -17,6 +20,7 @@ import * as XLSX from 'xlsx';
 
 export const DeliveryRecordsView: React.FC = () => {
   const [search, setSearch] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [permissionError, setPermissionError] = useState<string | null>(null);
 
@@ -52,6 +56,59 @@ export const DeliveryRecordsView: React.FC = () => {
     d.influencerName.toLowerCase().includes(search.toLowerCase()) ||
     d.product.toLowerCase().includes(search.toLowerCase())
   );
+
+  const isAllSelected = filtered.length > 0 && filtered.every(d => selectedIds.includes(d.id));
+
+  const handleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filtered.map(d => d.id));
+    }
+  };
+
+  const handleSelectOne = (id: string) => {
+    setSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleDeleteOne = (id: string, deliveryIdStr: string) => {
+    if (!canDelete) {
+      setPermissionError('Permission denied: Cannot delete delivery record');
+      return;
+    }
+    if (confirm(`Are you sure you want to delete delivery record ${deliveryIdStr}?`)) {
+      const res = store.deleteDelivery(id);
+      if (!res.success) {
+        setPermissionError(res.error || 'Failed to delete delivery record');
+      } else {
+        setSelectedIds(prev => prev.filter(item => item !== id));
+      }
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (!canDelete) return;
+    if (selectedIds.length === 0) return;
+    if (confirm(`Are you sure you want to delete ${selectedIds.length} selected delivery record(s)?`)) {
+      const res = await store.bulkDeleteDeliveries(selectedIds);
+      if (res.success) {
+        setSelectedIds([]);
+      } else {
+        setPermissionError(res.error || 'Failed to bulk delete delivery records');
+      }
+    }
+  };
+
+  const handleBulkStatus = async (status: DeliveryStatus) => {
+    if (!canUpdate) return;
+    if (selectedIds.length === 0) return;
+    const res = await store.bulkUpdateDeliveryStatus(selectedIds, status);
+    if (!res.success) {
+      setPermissionError(res.error || 'Failed to bulk update status');
+    }
+  };
 
   const handleCreateDelivery = (e: React.FormEvent) => {
     e.preventDefault();
@@ -177,6 +234,52 @@ export const DeliveryRecordsView: React.FC = () => {
         </div>
       </div>
 
+      {/* Bulk Operations Toolbar */}
+      {selectedIds.length > 0 && (
+        <div className="bg-emerald-950/40 border border-emerald-800/80 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg">
+          <div className="flex items-center gap-2 text-emerald-300 font-semibold text-xs">
+            <CheckSquare className="w-4 h-4 text-emerald-400" />
+            <span>{selectedIds.length} delivery record(s) selected</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {canUpdate && (
+              <>
+                <button
+                  onClick={() => handleBulkStatus('Received')}
+                  className="px-3 py-1.5 bg-emerald-900/60 hover:bg-emerald-900 text-emerald-200 border border-emerald-700/60 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Set Received</span>
+                </button>
+                <button
+                  onClick={() => handleBulkStatus('Sent')}
+                  className="px-3 py-1.5 bg-sky-900/60 hover:bg-sky-900 text-sky-200 border border-sky-700/60 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Clock className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Set Sent</span>
+                </button>
+                <button
+                  onClick={() => handleBulkStatus('Cancelled')}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <XCircle className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Set Cancelled</span>
+                </button>
+              </>
+            )}
+            {canDelete && (
+              <button
+                onClick={handleBulkDelete}
+                className="px-3 py-1.5 bg-rose-900/60 hover:bg-rose-900 text-rose-200 border border-rose-700/60 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                <span>Bulk Delete ({selectedIds.length})</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Deliveries Data Table */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
         <div className="p-4 border-b border-slate-800 flex items-center justify-between">
@@ -196,6 +299,14 @@ export const DeliveryRecordsView: React.FC = () => {
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-800/80 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800">
               <tr>
+                <th className="py-3 px-4 font-semibold w-10">
+                  <button 
+                    onClick={handleSelectAll}
+                    className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                  >
+                    {isAllSelected ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4" />}
+                  </button>
+                </th>
                 <th className="py-3 px-4 font-semibold">Delivery ID</th>
                 <th className="py-3 px-4 font-semibold">Influencer</th>
                 <th className="py-3 px-4 font-semibold">Product</th>
@@ -204,35 +315,58 @@ export const DeliveryRecordsView: React.FC = () => {
                 <th className="py-3 px-4 font-semibold text-right">Price</th>
                 <th className="py-3 px-4 font-semibold text-center">Delivery Status</th>
                 <th className="py-3 px-4 font-semibold text-center">Payment Status</th>
+                <th className="py-3 px-4 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 text-slate-300">
-              {filtered.map(d => (
-                <tr key={d.id} className="hover:bg-slate-800/40 transition-colors">
-                  <td className="py-3 px-4 font-mono font-bold text-amber-400">{d.deliveryId}</td>
-                  <td className="py-3 px-4 font-bold text-white">{d.influencerName}</td>
-                  <td className="py-3 px-4 text-slate-200">{d.product}</td>
-                  <td className="py-3 px-4 text-center font-mono">{d.quantity}</td>
-                  <td className="py-3 px-4 text-center font-mono text-slate-400">{d.date}</td>
-                  <td className="py-3 px-4 text-right font-mono font-bold text-white">${d.totalPrice}</td>
-                  <td className="py-3 px-4 text-center">
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">
-                      {d.deliveryStatus}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4 text-center">
-                    <span className={`inline-block px-2.5 py-0.5 rounded text-[10px] font-bold uppercase ${
-                      d.paymentStatus === 'Paid'
-                        ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
-                        : d.paymentStatus === 'Approved'
-                        ? 'bg-sky-950 text-sky-300 border border-sky-800'
-                        : 'bg-rose-950 text-rose-300 border border-rose-800'
-                    }`}>
-                      {d.paymentStatus}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {filtered.map(d => {
+                const isSelected = selectedIds.includes(d.id);
+                return (
+                  <tr key={d.id} className={`hover:bg-slate-800/40 transition-colors ${isSelected ? 'bg-emerald-500/5' : ''}`}>
+                    <td className="py-3 px-4">
+                      <button 
+                        onClick={() => handleSelectOne(d.id)}
+                        className="text-slate-400 hover:text-emerald-400 transition-colors cursor-pointer"
+                      >
+                        {isSelected ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4" />}
+                      </button>
+                    </td>
+                    <td className="py-3 px-4 font-mono font-bold text-amber-400">{d.deliveryId}</td>
+                    <td className="py-3 px-4 font-bold text-white">{d.influencerName}</td>
+                    <td className="py-3 px-4 text-slate-200">{d.product}</td>
+                    <td className="py-3 px-4 text-center font-mono">{d.quantity}</td>
+                    <td className="py-3 px-4 text-center font-mono text-slate-400">{d.date}</td>
+                    <td className="py-3 px-4 text-right font-mono font-bold text-white">${d.totalPrice}</td>
+                    <td className="py-3 px-4 text-center">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                        {d.deliveryStatus}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      <span className={`inline-block px-2.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                        d.paymentStatus === 'Paid'
+                          ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                          : d.paymentStatus === 'Approved'
+                          ? 'bg-sky-950 text-sky-300 border border-sky-800'
+                          : 'bg-rose-950 text-rose-300 border border-rose-800'
+                      }`}>
+                        {d.paymentStatus}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      {canDelete && (
+                        <button
+                          onClick={() => handleDeleteOne(d.id, d.deliveryId)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 cursor-pointer"
+                          title="Delete Delivery Record"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

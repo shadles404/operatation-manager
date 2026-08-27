@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Monitor, Plus, Search, Calendar, ShieldAlert, Edit2, Download } from 'lucide-react';
+import { Monitor, Plus, Search, Calendar, ShieldAlert, Edit2, Download, CheckSquare, Square, Trash2, CheckCircle2, XCircle } from 'lucide-react';
 import { store } from '../../services/store';
 import { LCDScreen, LCDStatus } from '../../types';
 import * as XLSX from 'xlsx';
 
 export const LCDScreensView: React.FC = () => {
   const [search, setSearch] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingLCD, setEditingLCD] = useState<LCDScreen | null>(null);
   const [permissionError, setPermissionError] = useState<string | null>(null);
@@ -28,6 +29,7 @@ export const LCDScreensView: React.FC = () => {
 
   const canAdd = store.hasPermission('lcd_screens', 'add');
   const canUpdate = store.hasPermission('lcd_screens', 'update');
+  const canDelete = store.hasPermission('lcd_screens', 'delete');
   const canExport = store.hasPermission('lcd_screens', 'export');
 
   const filtered = lcdScreens.filter(l =>
@@ -35,6 +37,59 @@ export const LCDScreensView: React.FC = () => {
     l.screenName.toLowerCase().includes(search.toLowerCase()) ||
     l.location.toLowerCase().includes(search.toLowerCase())
   );
+
+  const isAllSelected = filtered.length > 0 && filtered.every(l => selectedIds.includes(l.id));
+
+  const handleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filtered.map(l => l.id));
+    }
+  };
+
+  const handleSelectOne = (id: string) => {
+    setSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleDeleteOne = (id: string, screenIdStr: string) => {
+    if (!canDelete) {
+      setPermissionError('Permission denied: Cannot delete LCD screen');
+      return;
+    }
+    if (confirm(`Are you sure you want to delete screen ${screenIdStr}?`)) {
+      const res = store.deleteLCDScreen(id);
+      if (!res.success) {
+        setPermissionError(res.error || 'Failed to delete LCD screen');
+      } else {
+        setSelectedIds(prev => prev.filter(item => item !== id));
+      }
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (!canDelete) return;
+    if (selectedIds.length === 0) return;
+    if (confirm(`Are you sure you want to delete ${selectedIds.length} selected LCD screen(s)?`)) {
+      const res = await store.bulkDeleteLCDScreens(selectedIds);
+      if (res.success) {
+        setSelectedIds([]);
+      } else {
+        setPermissionError(res.error || 'Failed to bulk delete LCD screens');
+      }
+    }
+  };
+
+  const handleBulkStatus = async (status: LCDStatus) => {
+    if (!canUpdate) return;
+    if (selectedIds.length === 0) return;
+    const res = await store.bulkUpdateLCDScreenStatus(selectedIds, status);
+    if (!res.success) {
+      setPermissionError(res.error || 'Failed to bulk update status');
+    }
+  };
 
   const handleCreateOrUpdate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -158,6 +213,45 @@ export const LCDScreensView: React.FC = () => {
         </div>
       )}
 
+      {/* Bulk Operations Toolbar */}
+      {selectedIds.length > 0 && (
+        <div className="bg-purple-950/40 border border-purple-800/80 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg">
+          <div className="flex items-center gap-2 text-purple-300 font-semibold text-xs">
+            <CheckSquare className="w-4 h-4 text-purple-400" />
+            <span>{selectedIds.length} screen(s) selected</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {canUpdate && (
+              <>
+                <button
+                  onClick={() => handleBulkStatus('Active')}
+                  className="px-3 py-1.5 bg-emerald-900/60 hover:bg-emerald-900 text-emerald-200 border border-emerald-700/60 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Set Active</span>
+                </button>
+                <button
+                  onClick={() => handleBulkStatus('Maintenance')}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <XCircle className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Set Maintenance</span>
+                </button>
+              </>
+            )}
+            {canDelete && (
+              <button
+                onClick={handleBulkDelete}
+                className="px-3 py-1.5 bg-rose-900/60 hover:bg-rose-900 text-rose-200 border border-rose-700/60 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                <span>Bulk Delete ({selectedIds.length})</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Table */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
         <div className="p-4 border-b border-slate-800 flex items-center justify-between">
@@ -177,6 +271,14 @@ export const LCDScreensView: React.FC = () => {
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-800/80 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800">
               <tr>
+                <th className="py-3 px-4 font-semibold w-10">
+                  <button 
+                    onClick={handleSelectAll}
+                    className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                  >
+                    {isAllSelected ? <CheckSquare className="w-4 h-4 text-purple-400" /> : <Square className="w-4 h-4" />}
+                  </button>
+                </th>
                 <th className="py-3 px-4 font-semibold">Screen ID</th>
                 <th className="py-3 px-4 font-semibold">Display Name & Venue</th>
                 <th className="py-3 px-4 font-semibold text-center">Size</th>
@@ -192,9 +294,18 @@ export const LCDScreensView: React.FC = () => {
                 const endDate = new Date(lcd.agreementEnd);
                 const diffDays = Math.ceil((endDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
                 const activeVideosCount = lcdVideos.filter(v => v.screenId === lcd.id && (v.status === 'Showing' || v.status === 'Approved')).length;
+                const isSelected = selectedIds.includes(lcd.id);
 
                 return (
-                  <tr key={lcd.id} className="hover:bg-slate-800/40 transition-colors">
+                  <tr key={lcd.id} className={`hover:bg-slate-800/40 transition-colors ${isSelected ? 'bg-purple-500/5' : ''}`}>
+                    <td className="py-3.5 px-4">
+                      <button 
+                        onClick={() => handleSelectOne(lcd.id)}
+                        className="text-slate-400 hover:text-purple-400 transition-colors cursor-pointer"
+                      >
+                        {isSelected ? <CheckSquare className="w-4 h-4 text-purple-400" /> : <Square className="w-4 h-4" />}
+                      </button>
+                    </td>
                     <td className="py-3.5 px-4 font-mono font-bold text-purple-400">{lcd.screenId}</td>
                     <td className="py-3.5 px-4">
                       <div className="font-bold text-white text-sm">{lcd.screenName}</div>
@@ -219,7 +330,7 @@ export const LCDScreensView: React.FC = () => {
                         {lcd.status}
                       </span>
                     </td>
-                    <td className="py-3.5 px-4 text-right">
+                    <td className="py-3.5 px-4 text-right flex items-center justify-end gap-1">
                       {canUpdate && (
                         <button
                           onClick={() => {
@@ -230,9 +341,19 @@ export const LCDScreensView: React.FC = () => {
                             setRentPrice(lcd.rentPrice);
                             setIsModalOpen(true);
                           }}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-purple-400 hover:bg-slate-800"
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-purple-400 hover:bg-slate-800 cursor-pointer"
+                          title="Edit LCD Screen"
                         >
                           <Edit2 className="w-4 h-4" />
+                        </button>
+                      )}
+                      {canDelete && (
+                        <button
+                          onClick={() => handleDeleteOne(lcd.id, lcd.screenId)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 cursor-pointer"
+                          title="Delete LCD Screen"
+                        >
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       )}
                     </td>

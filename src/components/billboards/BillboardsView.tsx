@@ -10,7 +10,10 @@ import {
   Download,
   ShieldAlert,
   Trash2,
-  Edit2
+  Edit2,
+  CheckSquare,
+  Square,
+  XCircle
 } from 'lucide-react';
 import { store } from '../../services/store';
 import { Billboard, BillboardStatus, BillboardOpStatus } from '../../types';
@@ -19,6 +22,7 @@ import * as XLSX from 'xlsx';
 export const BillboardsView: React.FC = () => {
   const [search, setSearch] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<string>('All');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBillboard, setEditingBillboard] = useState<Billboard | null>(null);
   const [permissionError, setPermissionError] = useState<string | null>(null);
@@ -60,6 +64,59 @@ export const BillboardsView: React.FC = () => {
     const matchesStatus = selectedStatus === 'All' || b.status === selectedStatus;
     return matchesSearch && matchesStatus;
   });
+
+  const isAllSelected = filtered.length > 0 && filtered.every(b => selectedIds.includes(b.id));
+
+  const handleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filtered.map(b => b.id));
+    }
+  };
+
+  const handleSelectOne = (id: string) => {
+    setSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleDeleteOne = (id: string, billboardIdStr: string) => {
+    if (!canDelete) {
+      setPermissionError('Permission denied: Cannot delete billboard');
+      return;
+    }
+    if (confirm(`Are you sure you want to delete billboard ${billboardIdStr}?`)) {
+      const res = store.deleteBillboard(id);
+      if (!res.success) {
+        setPermissionError(res.error || 'Failed to delete billboard');
+      } else {
+        setSelectedIds(prev => prev.filter(item => item !== id));
+      }
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (!canDelete) return;
+    if (selectedIds.length === 0) return;
+    if (confirm(`Are you sure you want to delete ${selectedIds.length} selected billboard(s)?`)) {
+      const res = await store.bulkDeleteBillboards(selectedIds);
+      if (res.success) {
+        setSelectedIds([]);
+      } else {
+        setPermissionError(res.error || 'Failed to bulk delete billboards');
+      }
+    }
+  };
+
+  const handleBulkOpStatus = async (opStatus: BillboardOpStatus) => {
+    if (!canUpdate) return;
+    if (selectedIds.length === 0) return;
+    const res = await store.bulkUpdateBillboardOpStatus(selectedIds, opStatus);
+    if (!res.success) {
+      setPermissionError(res.error || 'Failed to bulk update status');
+    }
+  };
 
   const handleCreateOrUpdate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -202,6 +259,45 @@ export const BillboardsView: React.FC = () => {
         </div>
       )}
 
+      {/* Bulk Operations Toolbar */}
+      {selectedIds.length > 0 && (
+        <div className="bg-sky-950/40 border border-sky-800/80 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg">
+          <div className="flex items-center gap-2 text-sky-300 font-semibold text-xs">
+            <CheckSquare className="w-4 h-4 text-sky-400" />
+            <span>{selectedIds.length} billboard(s) selected</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {canUpdate && (
+              <>
+                <button
+                  onClick={() => handleBulkOpStatus('Active')}
+                  className="px-3 py-1.5 bg-emerald-900/60 hover:bg-emerald-900 text-emerald-200 border border-emerald-700/60 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Set Active</span>
+                </button>
+                <button
+                  onClick={() => handleBulkOpStatus('Expired')}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <XCircle className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Set Expired</span>
+                </button>
+              </>
+            )}
+            {canDelete && (
+              <button
+                onClick={handleBulkDelete}
+                className="px-3 py-1.5 bg-rose-900/60 hover:bg-rose-900 text-rose-200 border border-rose-700/60 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                <span>Bulk Delete ({selectedIds.length})</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Billboards Cards / Table */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
         <div className="p-4 border-b border-slate-800 flex items-center justify-between">
@@ -221,6 +317,14 @@ export const BillboardsView: React.FC = () => {
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-800/80 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800">
               <tr>
+                <th className="py-3 px-4 font-semibold w-10">
+                  <button 
+                    onClick={handleSelectAll}
+                    className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                  >
+                    {isAllSelected ? <CheckSquare className="w-4 h-4 text-sky-400" /> : <Square className="w-4 h-4" />}
+                  </button>
+                </th>
                 <th className="py-3 px-4 font-semibold">Billboard ID</th>
                 <th className="py-3 px-4 font-semibold">Location</th>
                 <th className="py-3 px-4 font-semibold text-center">Size & Type</th>
@@ -235,9 +339,18 @@ export const BillboardsView: React.FC = () => {
               {filtered.map(b => {
                 const endDate = new Date(b.agreementEnd);
                 const diffDays = Math.ceil((endDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
+                const isSelected = selectedIds.includes(b.id);
 
                 return (
-                  <tr key={b.id} className="hover:bg-slate-800/40 transition-colors">
+                  <tr key={b.id} className={`hover:bg-slate-800/40 transition-colors ${isSelected ? 'bg-sky-500/5' : ''}`}>
+                    <td className="py-3.5 px-4">
+                      <button 
+                        onClick={() => handleSelectOne(b.id)}
+                        className="text-slate-400 hover:text-sky-400 transition-colors cursor-pointer"
+                      >
+                        {isSelected ? <CheckSquare className="w-4 h-4 text-sky-400" /> : <Square className="w-4 h-4" />}
+                      </button>
+                    </td>
                     <td className="py-3.5 px-4 font-mono font-bold text-sky-400">{b.billboardId}</td>
                     <td className="py-3.5 px-4">
                       <div className="font-bold text-white">{b.location}</div>
@@ -268,7 +381,7 @@ export const BillboardsView: React.FC = () => {
                         {b.opStatus}
                       </span>
                     </td>
-                    <td className="py-3.5 px-4 text-right">
+                    <td className="py-3.5 px-4 text-right flex items-center justify-end gap-1">
                       {canUpdate && (
                         <button
                           onClick={() => {
@@ -280,9 +393,19 @@ export const BillboardsView: React.FC = () => {
                             setCurrentProduct(b.currentProduct || '');
                             setIsModalOpen(true);
                           }}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-sky-400 hover:bg-slate-800"
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-sky-400 hover:bg-slate-800 cursor-pointer"
+                          title="Edit Billboard"
                         >
                           <Edit2 className="w-4 h-4" />
+                        </button>
+                      )}
+                      {canDelete && (
+                        <button
+                          onClick={() => handleDeleteOne(b.id, b.billboardId)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 cursor-pointer"
+                          title="Delete Billboard"
+                        >
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       )}
                     </td>

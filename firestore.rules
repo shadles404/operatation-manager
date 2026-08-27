@@ -7,114 +7,91 @@ service cloud.firestore {
     }
 
     function getUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data
+        : null;
     }
 
     function isActive() {
-      return isSignedIn() && getUserData().status == 'active';
+      return isSignedIn() && getUserData() != null && getUserData().status == 'active';
     }
 
     function isAdmin() {
       return isActive() && getUserData().role == 'admin';
     }
 
-    function hasPermission(module, action) {
-      return isAdmin() || (
-        isActive() &&
-        getUserData().permissions != null &&
-        getUserData().permissions[module] != null &&
-        getUserData().permissions[module][action] == true
-      );
-    }
-
     // Users collection
     match /users/{userId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && (isAdmin() || !exists(/databases/$(database)/documents/users/$(request.auth.uid)));
-      allow update: if isAdmin() || (
-        isActive() && request.auth.uid == userId &&
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'permissions', 'status'])
-      );
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && (isAdmin() || request.auth.uid == userId);
       allow delete: if isAdmin();
     }
 
     // Influencers
     match /influencers/{id} {
-      allow read: if hasPermission('influencers', 'view');
-      allow create: if hasPermission('influencers', 'add');
-      allow update: if hasPermission('influencers', 'update');
-      allow delete: if hasPermission('influencers', 'delete');
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn();
     }
 
     // Targets
     match /targets/{id} {
-      allow read: if hasPermission('targets', 'view');
-      allow create: if hasPermission('targets', 'add');
-      allow update: if hasPermission('targets', 'update');
-      allow delete: if hasPermission('targets', 'delete');
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn();
     }
 
     // Deliveries
     match /deliveries/{id} {
-      allow read: if hasPermission('deliveries', 'view');
-      allow create: if hasPermission('deliveries', 'add');
-      allow update: if hasPermission('deliveries', 'update');
-      allow delete: if hasPermission('deliveries', 'delete');
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn();
     }
 
     // Billboards
     match /billboards/{id} {
-      allow read: if hasPermission('billboards', 'view');
-      allow create: if hasPermission('billboards', 'add');
-      allow update: if hasPermission('billboards', 'update');
-      allow delete: if hasPermission('billboards', 'delete');
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn();
     }
 
     // LCD Screens
     match /lcd_screens/{id} {
-      allow read: if hasPermission('lcd_screens', 'view');
-      allow create: if hasPermission('lcd_screens', 'add');
-      allow update: if hasPermission('lcd_screens', 'update');
-      allow delete: if hasPermission('lcd_screens', 'delete');
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn();
     }
 
     // LCD Videos
     match /lcd_videos/{id} {
-      allow read: if hasPermission('lcd_videos', 'view');
-      allow create: if hasPermission('lcd_videos', 'add');
-      allow update: if hasPermission('lcd_videos', 'update');
-      allow delete: if hasPermission('lcd_videos', 'delete');
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn();
     }
 
     // Budgets
     match /budgets/{id} {
-      allow read: if hasPermission('budget', 'view');
-      allow create: if hasPermission('budget', 'add');
-      allow update: if hasPermission('budget', 'update');
-      allow delete: if hasPermission('budget', 'delete');
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn();
     }
 
     // Expenses
     match /expenses/{id} {
-      allow read: if hasPermission('expenses', 'view');
-      allow create: if hasPermission('expenses', 'add');
-      allow update: if hasPermission('expenses', 'update');
-      allow delete: if hasPermission('expenses', 'delete');
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn();
     }
 
     // Payments
     match /payments/{id} {
-      allow read: if hasPermission('influencer_payments', 'view') || hasPermission('billboard_payments', 'view') || hasPermission('lcd_payments', 'view');
-      allow create: if isAdmin() || hasPermission('expenses', 'add') || hasPermission('deliveries', 'add') || hasPermission('billboards', 'add') || hasPermission('lcd_screens', 'add');
-      allow update: if isAdmin() || hasPermission('influencer_payments', 'approve') || hasPermission('billboard_payments', 'approve') || hasPermission('lcd_payments', 'approve');
-      allow delete: if isAdmin();
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn();
     }
 
     // Audit logs
     match /audit_logs/{id} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
+      allow read, create: if isSignedIn();
       allow update, delete: if false;
+    }
+
+    // Global Catch-all default deny
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
+

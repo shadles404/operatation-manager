@@ -21,12 +21,16 @@ import {
   InfluencerStatus,
   InfluencerTarget,
   DeliveryRecord,
+  DeliveryStatus,
   Billboard,
+  BillboardStatus,
+  BillboardOpStatus,
   LCDScreen,
   LCDVideo,
   Budget,
   Expense,
   CentralPayment,
+  CentralPaymentStatus,
   AuditLog,
   AlertItem,
   UserPermissions,
@@ -91,12 +95,12 @@ class StoreService {
   private auditLogs: AuditLog[] = [];
   private currentUser: User | null = null;
 
+  private snapshotUnsubs: (() => void)[] = [];
   private listeners: (() => void)[] = [];
 
   constructor() {
     this.currentUser = loadItem<User | null>(STORAGE_KEYS.CURRENT_USER, null);
     this.initAuthObserver();
-    this.initFirestoreListeners();
   }
 
   private initAuthObserver() {
@@ -119,7 +123,9 @@ class StoreService {
         } catch (e) {
           console.error('Error fetching auth user profile:', e);
         }
+        this.initFirestoreListeners();
       } else {
+        this.stopFirestoreListeners();
         this.currentUser = null;
         saveItem(STORAGE_KEYS.CURRENT_USER, null);
       }
@@ -127,7 +133,32 @@ class StoreService {
     });
   }
 
+  private stopFirestoreListeners() {
+    this.snapshotUnsubs.forEach(unsub => {
+      try {
+        unsub();
+      } catch (e) {
+        // ignore cleanup errors
+      }
+    });
+    this.snapshotUnsubs = [];
+    this.users = [];
+    this.influencers = [];
+    this.targets = [];
+    this.deliveries = [];
+    this.billboards = [];
+    this.lcdScreens = [];
+    this.lcdVideos = [];
+    this.budgets = [];
+    this.expenses = [];
+    this.payments = [];
+    this.auditLogs = [];
+  }
+
   private initFirestoreListeners() {
+    if (this.snapshotUnsubs.length > 0) return;
+    if (!auth.currentUser) return;
+
     // 1. Users Collection - strictly from Firebase Firestore
     this.listenCollection<User>('users', [], data => {
       this.users = data;
@@ -200,7 +231,7 @@ class StoreService {
   ) {
     const colRef = collection(db, colName);
 
-    onSnapshot(colRef, snapshot => {
+    const unsub = onSnapshot(colRef, snapshot => {
       if (!snapshot.empty) {
         const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as T);
         onUpdate(items);
@@ -210,8 +241,10 @@ class StoreService {
       this.recalculateAll();
       this.notifyListeners();
     }, err => {
-      console.error(`Firestore snapshot error for ${colName}:`, err);
+      console.warn(`Firestore snapshot notice for ${colName}:`, err.message);
     });
+
+    this.snapshotUnsubs.push(unsub);
   }
 
   public subscribe(fn: () => void): () => void {
@@ -521,6 +554,32 @@ class StoreService {
     return { success: true };
   }
 
+  public async bulkDeleteUsers(ids: string[]): Promise<{ success: boolean; count: number; error?: string }> {
+    if (!this.hasPermission('users', 'delete')) {
+      return { success: false, count: 0, error: 'Permission denied: Cannot delete users' };
+    }
+    let deletedCount = 0;
+    for (const id of ids) {
+      const res = await this.deleteUser(id);
+      if (res.success) deletedCount++;
+    }
+    this.logAudit('Bulk Deleted Users', 'users', `${deletedCount} user accounts deleted`);
+    return { success: true, count: deletedCount };
+  }
+
+  public async bulkUpdateUserStatus(ids: string[], status: 'active' | 'inactive'): Promise<{ success: boolean; count: number; error?: string }> {
+    if (!this.hasPermission('users', 'update')) {
+      return { success: false, count: 0, error: 'Permission denied: Cannot update users' };
+    }
+    let updatedCount = 0;
+    for (const id of ids) {
+      const res = await this.updateUser(id, { status });
+      if (res.success) updatedCount++;
+    }
+    this.logAudit('Bulk Updated User Status', 'users', `${updatedCount} accounts set to ${status}`);
+    return { success: true, count: updatedCount };
+  }
+
   // Influencer Management
   public getInfluencers(): Influencer[] {
     return this.influencers;
@@ -777,6 +836,32 @@ class StoreService {
     return { success: true };
   }
 
+  public async bulkDeleteDeliveries(ids: string[]): Promise<{ success: boolean; count: number; error?: string }> {
+    if (!this.hasPermission('deliveries', 'delete')) {
+      return { success: false, count: 0, error: 'Permission denied: Cannot delete delivery records' };
+    }
+    let deletedCount = 0;
+    for (const id of ids) {
+      const res = this.deleteDelivery(id);
+      if (res.success) deletedCount++;
+    }
+    this.logAudit('Bulk Deleted Deliveries', 'deliveries', `${deletedCount} records deleted`);
+    return { success: true, count: deletedCount };
+  }
+
+  public async bulkUpdateDeliveryStatus(ids: string[], deliveryStatus: DeliveryStatus): Promise<{ success: boolean; count: number; error?: string }> {
+    if (!this.hasPermission('deliveries', 'update')) {
+      return { success: false, count: 0, error: 'Permission denied: Cannot update delivery records' };
+    }
+    let updatedCount = 0;
+    for (const id of ids) {
+      const res = this.updateDelivery(id, { deliveryStatus });
+      if (res.success) updatedCount++;
+    }
+    this.logAudit('Bulk Updated Delivery Status', 'deliveries', `${updatedCount} updated to ${deliveryStatus}`);
+    return { success: true, count: updatedCount };
+  }
+
   // Billboards
   public getBillboards(): Billboard[] {
     return this.billboards;
@@ -850,6 +935,32 @@ class StoreService {
     this.recalculateAll();
     this.notifyListeners();
     return { success: true };
+  }
+
+  public async bulkDeleteBillboards(ids: string[]): Promise<{ success: boolean; count: number; error?: string }> {
+    if (!this.hasPermission('billboards', 'delete')) {
+      return { success: false, count: 0, error: 'Permission denied: Cannot delete billboards' };
+    }
+    let deletedCount = 0;
+    for (const id of ids) {
+      const res = this.deleteBillboard(id);
+      if (res.success) deletedCount++;
+    }
+    this.logAudit('Bulk Deleted Billboards', 'billboards', `${deletedCount} billboards deleted`);
+    return { success: true, count: deletedCount };
+  }
+
+  public async bulkUpdateBillboardOpStatus(ids: string[], opStatus: BillboardOpStatus): Promise<{ success: boolean; count: number; error?: string }> {
+    if (!this.hasPermission('billboards', 'update')) {
+      return { success: false, count: 0, error: 'Permission denied: Cannot update billboards' };
+    }
+    let updatedCount = 0;
+    for (const id of ids) {
+      const res = this.updateBillboard(id, { opStatus });
+      if (res.success) updatedCount++;
+    }
+    this.logAudit('Bulk Updated Billboard Pipeline Status', 'billboards', `${updatedCount} billboards set to ${opStatus}`);
+    return { success: true, count: updatedCount };
   }
 
   // LCD Screens
@@ -931,6 +1042,32 @@ class StoreService {
     return { success: true };
   }
 
+  public async bulkDeleteLCDScreens(ids: string[]): Promise<{ success: boolean; count: number; error?: string }> {
+    if (!this.hasPermission('lcd_screens', 'delete')) {
+      return { success: false, count: 0, error: 'Permission denied: Cannot delete LCD screens' };
+    }
+    let deletedCount = 0;
+    for (const id of ids) {
+      const res = this.deleteLCDScreen(id);
+      if (res.success) deletedCount++;
+    }
+    this.logAudit('Bulk Deleted LCD Screens', 'lcd_screens', `${deletedCount} screens deleted`);
+    return { success: true, count: deletedCount };
+  }
+
+  public async bulkUpdateLCDScreenStatus(ids: string[], status: LCDScreen['status']): Promise<{ success: boolean; count: number; error?: string }> {
+    if (!this.hasPermission('lcd_screens', 'update')) {
+      return { success: false, count: 0, error: 'Permission denied: Cannot update LCD screens' };
+    }
+    let updatedCount = 0;
+    for (const id of ids) {
+      const res = this.updateLCDScreen(id, { status });
+      if (res.success) updatedCount++;
+    }
+    this.logAudit('Bulk Updated LCD Screen Status', 'lcd_screens', `${updatedCount} screens set to ${status}`);
+    return { success: true, count: updatedCount };
+  }
+
   // LCD Video Tracking
   public getLCDVideos(): LCDVideo[] {
     return this.lcdVideos;
@@ -988,6 +1125,32 @@ class StoreService {
     this.recalculateAll();
     this.notifyListeners();
     return { success: true };
+  }
+
+  public async bulkDeleteLCDVideos(ids: string[]): Promise<{ success: boolean; count: number; error?: string }> {
+    if (!this.hasPermission('lcd_videos', 'delete')) {
+      return { success: false, count: 0, error: 'Permission denied: Cannot delete LCD videos' };
+    }
+    let deletedCount = 0;
+    for (const id of ids) {
+      const res = this.deleteLCDVideo(id);
+      if (res.success) deletedCount++;
+    }
+    this.logAudit('Bulk Deleted LCD Videos', 'lcd_videos', `${deletedCount} videos deleted`);
+    return { success: true, count: deletedCount };
+  }
+
+  public async bulkUpdateLCDVideoStatus(ids: string[], status: LCDVideo['status']): Promise<{ success: boolean; count: number; error?: string }> {
+    if (!this.hasPermission('lcd_videos', 'update')) {
+      return { success: false, count: 0, error: 'Permission denied: Cannot update LCD videos' };
+    }
+    let updatedCount = 0;
+    for (const id of ids) {
+      const res = this.updateLCDVideo(id, { status });
+      if (res.success) updatedCount++;
+    }
+    this.logAudit('Bulk Updated LCD Video Status', 'lcd_videos', `${updatedCount} videos set to ${status}`);
+    return { success: true, count: updatedCount };
   }
 
   // Budget & Expenses
@@ -1146,6 +1309,32 @@ class StoreService {
     return { success: true };
   }
 
+  public async bulkDeleteExpenses(ids: string[]): Promise<{ success: boolean; count: number; error?: string }> {
+    if (!this.hasPermission('expenses', 'delete')) {
+      return { success: false, count: 0, error: 'Permission denied: Cannot delete expense' };
+    }
+    let deletedCount = 0;
+    for (const id of ids) {
+      const res = this.deleteExpense(id);
+      if (res.success) deletedCount++;
+    }
+    this.logAudit('Bulk Deleted Expenses', 'expenses', `${deletedCount} expense records deleted`);
+    return { success: true, count: deletedCount };
+  }
+
+  public async bulkUpdateExpenseStatus(ids: string[], paymentStatus: Expense['paymentStatus']): Promise<{ success: boolean; count: number; error?: string }> {
+    if (!this.hasPermission('expenses', 'update')) {
+      return { success: false, count: 0, error: 'Permission denied: Cannot update expense' };
+    }
+    let updatedCount = 0;
+    for (const id of ids) {
+      const res = this.updateExpense(id, { paymentStatus });
+      if (res.success) updatedCount++;
+    }
+    this.logAudit('Bulk Updated Expense Status', 'expenses', `${updatedCount} records set to ${paymentStatus}`);
+    return { success: true, count: updatedCount };
+  }
+
   // Central Payments Management
   public getPayments(): CentralPayment[] {
     return this.payments;
@@ -1192,6 +1381,39 @@ class StoreService {
     this.recalculateAll();
     this.notifyListeners();
     return { success: true, data: this.payments[idx] };
+  }
+
+  public async deletePayment(id: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.hasPermission('influencer_payments', 'approve') && !this.hasPermission('billboard_payments', 'approve')) {
+      return { success: false, error: 'Permission denied: Cannot delete payments' };
+    }
+    const idx = this.payments.findIndex(p => p.id === id);
+    if (idx === -1) return { success: false, error: 'Payment record not found' };
+    const p = this.payments[idx];
+    this.payments.splice(idx, 1);
+    await deleteDoc(doc(db, 'payments', id)).catch(e => console.error(e));
+    this.logAudit('Deleted Payment Record', 'influencer_payments', p.paymentId, `Amount: $${p.amount}`);
+    this.recalculateAll();
+    this.notifyListeners();
+    return { success: true };
+  }
+
+  public async bulkDeletePayments(ids: string[]): Promise<{ success: boolean; count: number; error?: string }> {
+    let count = 0;
+    for (const id of ids) {
+      const res = await this.deletePayment(id);
+      if (res.success) count++;
+    }
+    return { success: true, count };
+  }
+
+  public async bulkUpdatePaymentStatus(ids: string[], nextStatus: CentralPaymentStatus): Promise<{ success: boolean; count: number; error?: string }> {
+    let count = 0;
+    for (const id of ids) {
+      const res = await this.updatePaymentStatus(id, nextStatus);
+      if (res.success) count++;
+    }
+    return { success: true, count };
   }
 
   // Audit Logs & Alerts
