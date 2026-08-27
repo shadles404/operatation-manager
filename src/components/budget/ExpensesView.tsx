@@ -22,6 +22,18 @@ export const ExpensesView: React.FC = () => {
   const expenses = store.getExpenses();
   const budgets = store.getBudgets();
 
+  const fallbackCategories = [
+    'Influencers',
+    'Billboards',
+    'LCD Screens',
+    'Product Delivery',
+    'Printing',
+    'Production',
+    'Other Marketing Operations'
+  ];
+  const availableCategories = budgets.filter(b => b.budgetType === budgetType).map(b => b.category);
+  const categoriesList = availableCategories.length > 0 ? Array.from(new Set(availableCategories)) : fallbackCategories;
+
   const canAdd = store.hasPermission('expenses', 'add') || store.hasPermission('budget', 'add');
   const canUpdate = store.hasPermission('expenses', 'update') || store.hasPermission('budget', 'update');
   const canDelete = store.hasPermission('expenses', 'delete') || store.hasPermission('budget', 'delete');
@@ -332,7 +344,13 @@ export const ExpensesView: React.FC = () => {
                   <label className="block font-semibold text-slate-300 mb-1">Budget Pool *</label>
                   <select
                     value={budgetType}
-                    onChange={e => setBudgetType(e.target.value as BudgetType)}
+                    onChange={e => {
+                      const newType = e.target.value as BudgetType;
+                      setBudgetType(newType);
+                      const cats = budgets.filter(b => b.budgetType === newType).map(b => b.category);
+                      const list = cats.length > 0 ? Array.from(new Set(cats)) : fallbackCategories;
+                      setCategory(list[0]);
+                    }}
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white"
                   >
                     <option value="Local">Local Budget</option>
@@ -347,13 +365,9 @@ export const ExpensesView: React.FC = () => {
                     onChange={e => setCategory(e.target.value as BudgetCategory)}
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white"
                   >
-                    <option value="Influencers">Influencers</option>
-                    <option value="Billboards">Billboards</option>
-                    <option value="LCD Screens">LCD Screens</option>
-                    <option value="Product Delivery">Product Delivery</option>
-                    <option value="Printing">Printing</option>
-                    <option value="Production">Production</option>
-                    <option value="Other Marketing Operations">Other Marketing Operations</option>
+                    {categoriesList.map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
                   </select>
                 </div>
               </div>

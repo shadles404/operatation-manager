@@ -1194,7 +1194,19 @@ class StoreService {
     this.budgets[idx] = updated;
     setDoc(doc(db, 'budgets', id), sanitizeFirestoreData(updated)).catch(e => console.error(e));
 
-    this.logAudit('Updated Budget Allocation', 'budget', updated.budgetId, `Allocated: $${oldVal.allocated}`, `Allocated: $${updated.allocated}`);
+    // Propagate category name change to linked expenses
+    if (updates.category && updates.category !== oldVal.category) {
+      this.expenses = this.expenses.map(exp => {
+        if (exp.category === oldVal.category && exp.budgetType === oldVal.budgetType) {
+          const updatedExp = { ...exp, category: updates.category! };
+          setDoc(doc(db, 'expenses', exp.id), sanitizeFirestoreData(updatedExp)).catch(e => console.error(e));
+          return updatedExp;
+        }
+        return exp;
+      });
+    }
+
+    this.logAudit('Updated Budget Allocation', 'budget', updated.budgetId, `Allocated: $${oldVal.allocated}, Category: ${oldVal.category}`, `Allocated: $${updated.allocated}, Category: ${updated.category}`);
     this.recalculateAll();
     this.notifyListeners();
     return { success: true, data: updated };
@@ -1341,6 +1353,186 @@ class StoreService {
   // Central Payments Management
   public getPayments(): CentralPayment[] {
     return this.payments;
+  }
+
+  public async addPayment(pay: Omit<CentralPayment, 'id' | 'createdAt'>): Promise<{ success: boolean; data?: CentralPayment; error?: string }> {
+    const newPay: CentralPayment = {
+      ...pay,
+      id: `pay-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      createdAt: new Date().toISOString()
+    };
+    this.payments.push(newPay);
+    try {
+      await setDoc(doc(db, 'payments', newPay.id), sanitizeFirestoreData(newPay));
+      this.logAudit('Manual Payment Created', 'influencer_payments', newPay.paymentId, undefined, `Recipient: ${newPay.recipient}, Amount: $${newPay.amount}`);
+      this.recalculateAll();
+      this.notifyListeners();
+      return { success: true, data: newPay };
+    } catch (e: any) {
+      console.error('Error adding payment to Firestore:', e);
+      return { success: false, error: e.message || 'Failed to add payment' };
+    }
+  }
+
+  public async updatePayment(id: string, updates: Partial<CentralPayment>): Promise<{ success: boolean; data?: CentralPayment; error?: string }> {
+    const idx = this.payments.findIndex(p => p.id === id);
+    if (idx === -1) return { success: false, error: 'Payment not found' };
+
+    const oldP = this.payments[idx];
+    const updated = { ...oldP, ...updates };
+    this.payments[idx] = updated;
+
+    try {
+      await setDoc(doc(db, 'payments', id), sanitizeFirestoreData(updated));
+      this.logAudit('Updated Central Payment Details', 'influencer_payments', updated.paymentId, `Amount: $${oldP.amount}`, `Amount: $${updated.amount}`);
+      this.recalculateAll();
+      this.notifyListeners();
+      return { success: true, data: updated };
+    } catch (e: any) {
+      console.error('Error updating payment in Firestore:', e);
+      return { success: false, error: e.message || 'Failed to update payment' };
+    }
+  }
+
+  public async generateMonthlyPayments(period: string): Promise<{ success: boolean; generated: number; skipped: number; error?: string }> {
+    if (!this.hasPermission('influencer_payments', 'approve') && !this.hasPermission('billboard_payments', 'approve')) {
+      return { success: false, generated: 0, skipped: 0, error: 'Permission denied: Admin approval rights required to run month close operations' };
+    }
+
+    const monthsMap: Record<string, string> = {
+      'January': '01', 'February': '02', 'March': '03', 'April': '04',
+      'May': '05', 'June': '06', 'July': '07', 'August': '08',
+      'September': '09', 'October': '10', 'November': '11', 'December': '12'
+    };
+
+    const parts = period.split(' ');
+    const monthName = parts[0];
+    const year = parts[1] || '2026';
+    const monthNum = monthsMap[monthName] || '08';
+    const startStr = `${year}-${monthNum}-01`;
+    const daysInMonth = new Date(Number(year), Number(monthNum), 0).getDate();
+    const endStr = `${year}-${monthNum}-${daysInMonth}`;
+
+    let generated = 0;
+    let skipped = 0;
+
+    // 1. Billboards
+    for (const bb of this.billboards) {
+      if (bb.status !== 'Active') continue;
+      // Intersection check: bb active interval intersects with [startStr, endStr]
+      if (bb.agreementStart <= endStr && bb.agreementEnd >= startStr) {
+        // Check for duplicates
+        const exists = this.payments.some(p => 
+          p.relatedEntityId === bb.id && 
+          p.paymentType === 'Billboard' && 
+          p.reference.includes(period)
+        );
+
+        if (exists) {
+          skipped++;
+          continue;
+        }
+
+        const newPay: CentralPayment = {
+          id: `pay-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
+          paymentId: `BB-${Math.floor(1000 + Math.random()*9000)}`,
+          paymentType: 'Billboard',
+          recipient: `${bb.ownerProvider} (${bb.billboardId})`,
+          reference: `Rent - ${period}`,
+          amount: bb.rentPrice,
+          currency: bb.currency || 'USD',
+          dueDate: endStr,
+          status: 'Pending Approval',
+          relatedEntityId: bb.id,
+          budgetType: 'Local',
+          notes: `Monthly billboard lease rent for ${bb.location} (${bb.billboardId}) for ${period}`,
+          createdAt: new Date().toISOString()
+        };
+
+        await setDoc(doc(db, 'payments', newPay.id), sanitizeFirestoreData(newPay)).catch(e => console.error(e));
+        this.payments.push(newPay);
+        generated++;
+      }
+    }
+
+    // 2. LCD Screens
+    for (const lcd of this.lcdScreens) {
+      if (lcd.status !== 'Active') continue;
+      if (lcd.agreementStart <= endStr && lcd.agreementEnd >= startStr) {
+        const exists = this.payments.some(p => 
+          p.relatedEntityId === lcd.id && 
+          p.paymentType === 'LCD Screen' && 
+          p.reference.includes(period)
+        );
+
+        if (exists) {
+          skipped++;
+          continue;
+        }
+
+        const newPay: CentralPayment = {
+          id: `pay-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
+          paymentId: `LCD-${Math.floor(1000 + Math.random()*9000)}`,
+          paymentType: 'LCD Screen',
+          recipient: `${lcd.ownerProvider} (${lcd.screenId})`,
+          reference: `Rent - ${period}`,
+          amount: lcd.rentPrice,
+          currency: lcd.currency || 'USD',
+          dueDate: endStr,
+          status: 'Pending Approval',
+          relatedEntityId: lcd.id,
+          budgetType: 'Local',
+          notes: `Monthly LCD screen venue lease for ${lcd.screenName} (${lcd.screenId}) for ${period}`,
+          createdAt: new Date().toISOString()
+        };
+
+        await setDoc(doc(db, 'payments', newPay.id), sanitizeFirestoreData(newPay)).catch(e => console.error(e));
+        this.payments.push(newPay);
+        generated++;
+      }
+    }
+
+    // 3. Influencers
+    for (const inf of this.influencers) {
+      if (inf.status !== 'Active') continue;
+      if (inf.agreementStart <= endStr && inf.agreementEnd >= startStr) {
+        const exists = this.payments.some(p => 
+          p.relatedEntityId === inf.id && 
+          p.paymentType === 'Influencer' && 
+          p.reference.includes(period)
+        );
+
+        if (exists) {
+          skipped++;
+          continue;
+        }
+
+        const newPay: CentralPayment = {
+          id: `pay-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
+          paymentId: `INF-${Math.floor(1000 + Math.random()*9000)}`,
+          paymentType: 'Influencer',
+          recipient: inf.fullName,
+          reference: `Retainer - ${period}`,
+          amount: inf.salary,
+          currency: 'USD',
+          dueDate: endStr,
+          status: 'Pending Approval',
+          relatedEntityId: inf.id,
+          budgetType: 'Local',
+          notes: `Monthly agreement retainer salary for ${inf.fullName} for ${period}`,
+          createdAt: new Date().toISOString()
+        };
+
+        await setDoc(doc(db, 'payments', newPay.id), sanitizeFirestoreData(newPay)).catch(e => console.error(e));
+        this.payments.push(newPay);
+        generated++;
+      }
+    }
+
+    this.logAudit('Generated Monthly Payments Ledger', 'influencer_payments', period, undefined, `Generated: ${generated}, Skipped: ${skipped}`);
+    this.recalculateAll();
+    this.notifyListeners();
+    return { success: true, generated, skipped };
   }
 
   public updatePaymentStatus(id: string, newStatus: CentralPayment['status'], method?: string, ref?: string): { success: boolean; data?: CentralPayment; error?: string } {

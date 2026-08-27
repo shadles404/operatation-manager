@@ -189,14 +189,7 @@ export interface LCDVideo {
 
 // Budget & Expenses Types
 export type BudgetType = 'Local' | 'International';
-export type BudgetCategory =
-  | 'Influencers'
-  | 'Billboards'
-  | 'LCD Screens'
-  | 'Product Delivery'
-  | 'Printing'
-  | 'Production'
-  | 'Other Marketing Operations';
+export type BudgetCategory = string;
 
 export type BudgetWarningLevel = 'Normal' | 'Warning' | 'Critical' | 'Exceeded';
 

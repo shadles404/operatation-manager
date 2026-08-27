@@ -238,6 +238,19 @@ export const BillboardsView: React.FC = () => {
                 setEditingBillboard(null);
                 setBillboardId(`BB-${Math.floor(100 + Math.random()*900)}`);
                 setLocation('');
+                setExactAddress('');
+                setSize('12m x 4m');
+                setBillboardType('Unipole Static');
+                setRentPrice(1500);
+                setInstallationCost(300);
+                setPrintingCost(400);
+                setAgreementStart('2026-08-01');
+                setAgreementEnd('2026-09-30');
+                setCurrentProduct('');
+                setCurrentCampaign('');
+                setStatus('Active');
+                setOpStatus('Active');
+                setNotes('');
                 setIsModalOpen(true);
               }}
               className="px-4 py-2 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-sky-500/20 flex items-center gap-1.5 transition-all cursor-pointer"
@@ -388,9 +401,19 @@ export const BillboardsView: React.FC = () => {
                             setEditingBillboard(b);
                             setBillboardId(b.billboardId);
                             setLocation(b.location);
-                            setExactAddress(b.exactAddress);
+                            setExactAddress(b.exactAddress || '');
+                            setSize(b.size || '12m x 4m');
+                            setBillboardType(b.billboardType || 'Unipole Static');
                             setRentPrice(b.rentPrice);
+                            setInstallationCost(b.installationCost || 0);
+                            setPrintingCost(b.printingCost || 0);
+                            setAgreementStart(b.agreementStart || '2026-08-01');
+                            setAgreementEnd(b.agreementEnd || '2026-09-30');
                             setCurrentProduct(b.currentProduct || '');
+                            setCurrentCampaign(b.currentCampaign || '');
+                            setStatus(b.status || 'Active');
+                            setOpStatus(b.opStatus || 'Active');
+                            setNotes(b.notes || '');
                             setIsModalOpen(true);
                           }}
                           className="p-1.5 rounded-lg text-slate-400 hover:text-sky-400 hover:bg-slate-800 cursor-pointer"
@@ -461,6 +484,31 @@ export const BillboardsView: React.FC = () => {
                   placeholder="Street, landmark, district..."
                   className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white"
                 />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">Billboard Size *</label>
+                  <input
+                    type="text"
+                    required
+                    value={size}
+                    onChange={e => setSize(e.target.value)}
+                    placeholder="e.g. 12m x 4m"
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">Billboard Type</label>
+                  <input
+                    type="text"
+                    value={billboardType}
+                    onChange={e => setBillboardType(e.target.value)}
+                    placeholder="e.g. Unipole Static"
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
