@@ -1,0 +1,195 @@
+{
+  "entities": {
+    "users": {
+      "title": "Users",
+      "description": "User accounts and RBAC permissions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fullName": { "type": "string" },
+        "username": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "role": { "type": "string" },
+        "status": { "type": "string" },
+        "lastLogin": { "type": "string" },
+        "permissions": { "type": "object" }
+      },
+      "required": ["id", "fullName", "username", "email", "role"]
+    },
+    "influencers": {
+      "title": "Influencers",
+      "description": "Influencer details and agreements",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "handle": { "type": "string" },
+        "platform": { "type": "string" },
+        "location": { "type": "string" },
+        "monthlyRetainer": { "type": "number" },
+        "assignedManager": { "type": "string" },
+        "contractStatus": { "type": "string" },
+        "joinedDate": { "type": "string" }
+      },
+      "required": ["id", "name", "handle", "monthlyRetainer"]
+    },
+    "targets": {
+      "title": "Influencer Targets",
+      "description": "Monthly video production targets",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "influencerId": { "type": "string" },
+        "influencerName": { "type": "string" },
+        "month": { "type": "string" },
+        "targetVideos": { "type": "number" },
+        "completedVideos": { "type": "number" },
+        "remainingVideos": { "type": "number" },
+        "achievementPercent": { "type": "number" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "influencerId", "month", "targetVideos"]
+    },
+    "deliveries": {
+      "title": "Delivery Records",
+      "description": "Sample product deliveries to influencers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "deliveryId": { "type": "string" },
+        "influencerId": { "type": "string" },
+        "influencerName": { "type": "string" },
+        "productName": { "type": "string" },
+        "quantity": { "type": "number" },
+        "deliveryDate": { "type": "string" },
+        "trackingNumber": { "type": "string" },
+        "deliveryStatus": { "type": "string" },
+        "acknowledged": { "type": "boolean" },
+        "notes": { "type": "string" }
+      },
+      "required": ["id", "influencerId", "productName", "quantity"]
+    },
+    "billboards": {
+      "title": "Billboards",
+      "description": "Outdoor billboard advertising sites",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "billboardId": { "type": "string" },
+        "location": { "type": "string" },
+        "size": { "type": "string" },
+        "rentPrice": { "type": "number" },
+        "printingFee": { "type": "number" },
+        "supplier": { "type": "string" },
+        "currentProduct": { "type": "string" },
+        "agreementStart": { "type": "string" },
+        "agreementEnd": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "billboardId", "location", "rentPrice"]
+    },
+    "lcd_screens": {
+      "title": "LCD Screens",
+      "description": "Venue LCD advertising displays",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "screenId": { "type": "string" },
+        "screenName": { "type": "string" },
+        "location": { "type": "string" },
+        "resolution": { "type": "string" },
+        "rentPrice": { "type": "number" },
+        "agreementStart": { "type": "string" },
+        "agreementEnd": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "screenId", "screenName", "rentPrice"]
+    },
+    "lcd_videos": {
+      "title": "LCD Videos",
+      "description": "Video ad commercials playing on LCD displays",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "videoId": { "type": "string" },
+        "screenId": { "type": "string" },
+        "screenName": { "type": "string" },
+        "videoName": { "type": "string" },
+        "product": { "type": "string" },
+        "campaign": { "type": "string" },
+        "duration": { "type": "string" },
+        "resolution": { "type": "string" },
+        "submittedDate": { "type": "string" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "screenId", "videoName"]
+    },
+    "budgets": {
+      "title": "Budgets",
+      "description": "Marketing budget pools and tracking",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "budgetType": { "type": "string" },
+        "category": { "type": "string" },
+        "allocated": { "type": "number" },
+        "spent": { "type": "number" },
+        "committed": { "type": "number" },
+        "remaining": { "type": "number" },
+        "warningLevel": { "type": "string" }
+      },
+      "required": ["id", "budgetType", "category", "allocated"]
+    },
+    "expenses": {
+      "title": "Expenses",
+      "description": "Individual marketing expenditure items",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "expenseId": { "type": "string" },
+        "category": { "type": "string" },
+        "amount": { "type": "number" },
+        "date": { "type": "string" },
+        "description": { "type": "string" },
+        "approvedBy": { "type": "string" },
+        "paymentStatus": { "type": "string" },
+        "budgetType": { "type": "string" }
+      },
+      "required": ["id", "expenseId", "amount", "budgetType"]
+    },
+    "payments": {
+      "title": "Central Payments",
+      "description": "Consolidated payment transactions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "paymentId": { "type": "string" },
+        "paymentType": { "type": "string" },
+        "recipient": { "type": "string" },
+        "amount": { "type": "number" },
+        "dueDate": { "type": "string" },
+        "status": { "type": "string" },
+        "reference": { "type": "string" }
+      },
+      "required": ["id", "paymentId", "recipient", "amount", "status"]
+    },
+    "audit_logs": {
+      "title": "Audit Logs",
+      "description": "System activity and security audit trail",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "dateTime": { "type": "string" },
+        "user": { "type": "string" },
+        "username": { "type": "string" },
+        "action": { "type": "string" },
+        "module": { "type": "string" },
+        "record": { "type": "string" }
+      },
+      "required": ["id", "user", "action", "module"]
+    }
+  }
+}

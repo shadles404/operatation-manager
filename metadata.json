@@ -1,0 +1,6 @@
+{
+  "name": "Marketing Operations Manager",
+  "description": "Comprehensive marketing operations management system for influencers, billboards, LCD screens, budgets, payments, user permissions, and operational reporting.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
