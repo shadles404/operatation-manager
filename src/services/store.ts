@@ -196,6 +196,9 @@ class StoreService {
     // 6. LCD Screens
     this.listenCollection<LCDScreen>('lcd_screens', [], data => {
       this.lcdScreens = data;
+      if (data.length === 0 && auth.currentUser) {
+        this.seedLCDScreens();
+      }
     });
 
     // 7. LCD Videos
@@ -1533,6 +1536,147 @@ class StoreService {
     });
 
     return alerts;
+  }
+
+  private async seedLCDScreens() {
+    const initial7: Omit<LCDScreen, 'id' | 'createdAt'>[] = [
+      {
+        screenId: 'LCD-001',
+        screenName: 'Mogadishu Mall Atrium Screen',
+        location: 'Mogadishu Mall',
+        exactAddress: 'Ground Floor Main Atrium',
+        screenSize: '85 inch',
+        resolution: '4K UHD',
+        screenType: 'Indoor Digital Wall',
+        ownerProvider: 'Digital Vision Somalia',
+        contact: '+252 61 900 8877',
+        rentPrice: 1200,
+        currency: 'USD',
+        paymentFrequency: 'Monthly',
+        agreementStart: '2026-01-01',
+        agreementEnd: '2026-12-31',
+        status: 'Active',
+        currentProduct: 'Amana Bank Commercial'
+      },
+      {
+        screenId: 'LCD-002',
+        screenName: 'Liido Beach Walk Digital Banner',
+        location: 'Liido Beach Walk',
+        exactAddress: 'Near Elite Hotel Entrance',
+        screenSize: '65 inch',
+        resolution: '1080p FHD',
+        screenType: 'Outdoor Digital Pylon',
+        ownerProvider: 'Oceanic Media',
+        contact: '+252 61 888 2233',
+        rentPrice: 850,
+        currency: 'USD',
+        paymentFrequency: 'Monthly',
+        agreementStart: '2026-03-15',
+        agreementEnd: '2026-09-15',
+        status: 'Active',
+        currentProduct: 'Somgas Campaign Video'
+      },
+      {
+        screenId: 'LCD-003',
+        screenName: 'KM4 Intersection Mega LED',
+        location: 'KM4 Junction',
+        exactAddress: 'Premier Bank Building Wall',
+        screenSize: '2496 x 192 px',
+        resolution: 'Custom LED (2496x192)',
+        screenType: 'Outdoor LED Screen',
+        ownerProvider: 'City Screens Ltd',
+        contact: '+252 61 777 4455',
+        rentPrice: 2500,
+        currency: 'USD',
+        paymentFrequency: 'Monthly',
+        agreementStart: '2026-05-01',
+        agreementEnd: '2026-11-30',
+        status: 'Active',
+        currentProduct: 'Hormuud 5G Launch'
+      },
+      {
+        screenId: 'LCD-004',
+        screenName: 'Jazeera Plaza Reception Display',
+        location: 'Jazeera Plaza',
+        exactAddress: 'Lobby Waiting Area',
+        screenSize: '55 inch',
+        resolution: '1080p FHD',
+        screenType: 'Indoor Wall Mount',
+        ownerProvider: 'Plaza Media Group',
+        contact: '+252 61 555 1122',
+        rentPrice: 600,
+        currency: 'USD',
+        paymentFrequency: 'Monthly',
+        agreementStart: '2026-02-10',
+        agreementEnd: '2026-08-10',
+        status: 'Expired',
+        currentProduct: 'Daallo Airlines Promo'
+      },
+      {
+        screenId: 'LCD-005',
+        screenName: 'Somali National University Info Wall',
+        location: 'SNU Campus',
+        exactAddress: 'Main Library Lobby',
+        screenSize: '75 inch',
+        resolution: '2K QuadHD',
+        screenType: 'Indoor Info Screen',
+        ownerProvider: 'Digital Vision Somalia',
+        contact: '+252 61 900 8877',
+        rentPrice: 750,
+        currency: 'USD',
+        paymentFrequency: 'Monthly',
+        agreementStart: '2026-08-01',
+        agreementEnd: '2027-02-01',
+        status: 'Active',
+        currentProduct: 'Student Enrollment Video'
+      },
+      {
+        screenId: 'LCD-006',
+        screenName: 'Mogadishu Port Terminal Screen',
+        location: 'Port Terminal 1',
+        exactAddress: 'Passenger Exit Lounge',
+        screenSize: '65 inch',
+        resolution: '1080p FHD',
+        screenType: 'Indoor Digital Banner',
+        ownerProvider: 'Port Media Corp',
+        contact: '+252 61 333 4455',
+        rentPrice: 1100,
+        currency: 'USD',
+        paymentFrequency: 'Monthly',
+        agreementStart: '2026-04-01',
+        agreementEnd: '2026-10-01',
+        status: 'Active',
+        currentProduct: 'DP World Mogadishu Doc'
+      },
+      {
+        screenId: 'LCD-007',
+        screenName: 'Premier Bank Tower Wall Screen',
+        location: 'Premier Bank HQ',
+        exactAddress: 'Mezzanine Floor Elevators',
+        screenSize: '85 inch',
+        resolution: '4K UHD',
+        screenType: 'Indoor Digital Wall',
+        ownerProvider: 'Premier Media',
+        contact: '+252 61 222 9988',
+        rentPrice: 1800,
+        currency: 'USD',
+        paymentFrequency: 'Monthly',
+        agreementStart: '2026-07-01',
+        agreementEnd: '2027-07-01',
+        status: 'Active',
+        currentProduct: 'Premier Mastercard Launch'
+      }
+    ];
+
+    for (const item of initial7) {
+      const id = `lcd-${item.screenId.toLowerCase()}`;
+      const screenDoc: LCDScreen = {
+        ...item,
+        id,
+        createdAt: new Date().toISOString()
+      };
+      setDoc(doc(db, 'lcd_screens', id), sanitizeFirestoreData(screenDoc)).catch(e => console.error(e));
+    }
   }
 }
 

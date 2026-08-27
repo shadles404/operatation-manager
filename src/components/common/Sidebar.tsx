@@ -239,27 +239,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {openGroups.LCD && (
                 <div className="ml-3 pl-3 border-l border-slate-800 space-y-0.5 mt-0.5">
                   <button
-                    onClick={() => handleItemClick('LCD Screens', 'All LCD Screens')}
+                    onClick={() => handleItemClick('LCD Screens', 'LCD Registration')}
                     className={`w-full text-left px-3 py-1.5 rounded-md transition-colors ${
-                      currentNav.section === 'LCD Screens' && currentNav.subSection === 'All LCD Screens'
+                      currentNav.section === 'LCD Screens' && currentNav.subSection === 'LCD Registration'
                         ? 'bg-amber-500/15 text-amber-400 font-semibold border-l-2 border-amber-400'
                         : 'hover:bg-slate-800 text-slate-300'
                     }`}
                   >
-                    All LCD Screens
+                    LCD Registration
                   </button>
-                  {isModuleVisible('lcd_videos') && (
-                    <button
-                      onClick={() => handleItemClick('LCD Screens', 'Video Tracking')}
-                      className={`w-full text-left px-3 py-1.5 rounded-md transition-colors ${
-                        currentNav.section === 'LCD Screens' && currentNav.subSection === 'Video Tracking'
-                          ? 'bg-amber-500/15 text-amber-400 font-semibold border-l-2 border-amber-400'
-                          : 'hover:bg-slate-800 text-slate-300'
-                      }`}
-                    >
-                      Video Tracking
-                    </button>
-                  )}
                   {isModuleVisible('lcd_payments') && (
                     <button
                       onClick={() => handleItemClick('LCD Screens', 'Payments')}

@@ -86,7 +86,6 @@ export default function App() {
     }
 
     if (section === 'LCD Screens') {
-      if (subSection === 'Video Tracking') return <LCDVideosView />;
       if (subSection === 'Payments') return <LCDPaymentsView />;
       return <LCDScreensView />;
     }

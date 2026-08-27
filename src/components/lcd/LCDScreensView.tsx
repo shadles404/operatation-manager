@@ -13,18 +13,20 @@ export const LCDScreensView: React.FC = () => {
 
   // Form Fields
   const [screenId, setScreenId] = useState('LCD-005');
-  const [screenName, setScreenName] = useState('');
-  const [location, setLocation] = useState('');
-  const [exactAddress, setExactAddress] = useState('Km4 Intersection, Mogadishu');
-  const [screenSize, setScreenSize] = useState('85 inch');
-  const [resolution, setResolution] = useState('4K UHD');
-  const [rentPrice, setRentPrice] = useState(800);
-  const [agreementStart, setAgreementStart] = useState('2026-08-01');
-  const [agreementEnd, setAgreementEnd] = useState('2026-09-30');
+  const [screenName, setScreenName] = useState(''); // Screen/Vendor Name
+  const [videoPlayed, setVideoPlayed] = useState(''); // Video Played
+  const [resolution, setResolution] = useState('4K UHD'); // Screen Resolution
+  const [rentPrice, setRentPrice] = useState(800); // Price
+  const [agreementStart, setAgreementStart] = useState('2026-08-01'); // Agreement Start Date
+  const [agreementEnd, setAgreementEnd] = useState('2026-09-30'); // Agreement End Date
   const [status, setStatus] = useState<LCDStatus>('Active');
 
+  // Hidden / Default form states but kept for model compliance
+  const [location, setLocation] = useState('Mogadishu');
+  const [exactAddress, setExactAddress] = useState('Main Lobby');
+  const [screenSize, setScreenSize] = useState('85 inch');
+
   const lcdScreens = store.getLCDScreens();
-  const lcdVideos = store.getLCDVideos();
   const today = new Date('2026-08-27');
 
   const canAdd = store.hasPermission('lcd_screens', 'add');
@@ -35,7 +37,7 @@ export const LCDScreensView: React.FC = () => {
   const filtered = lcdScreens.filter(l =>
     l.screenId.toLowerCase().includes(search.toLowerCase()) ||
     l.screenName.toLowerCase().includes(search.toLowerCase()) ||
-    l.location.toLowerCase().includes(search.toLowerCase())
+    (l.currentProduct || '').toLowerCase().includes(search.toLowerCase())
   );
 
   const isAllSelected = filtered.length > 0 && filtered.every(l => selectedIds.includes(l.id));
@@ -108,7 +110,8 @@ export const LCDScreensView: React.FC = () => {
         rentPrice,
         agreementStart,
         agreementEnd,
-        status
+        status,
+        currentProduct: videoPlayed
       });
       if (res.success) {
         setIsModalOpen(false);
@@ -127,14 +130,15 @@ export const LCDScreensView: React.FC = () => {
         screenSize,
         resolution,
         screenType: 'Indoor Digital Mall Wall',
-        ownerProvider: 'Digital Vision Somalia',
+        ownerProvider: screenName, // use name as provider / vendor
         contact: '+252 61 900 8877',
         rentPrice,
         currency: 'USD',
         paymentFrequency: 'Monthly',
         agreementStart,
         agreementEnd,
-        status
+        status,
+        currentProduct: videoPlayed
       });
       if (res.success) setIsModalOpen(false);
       else setPermissionError(res.error || 'Failed to add LCD screen');
@@ -148,18 +152,18 @@ export const LCDScreensView: React.FC = () => {
     }
     const data = filtered.map(l => ({
       ScreenID: l.screenId,
-      Name: l.screenName,
-      Location: l.location,
-      Address: l.exactAddress,
-      Size: l.screenSize,
-      RentMonthly: l.rentPrice,
-      AgreementEnd: l.agreementEnd,
+      Screen_Vendor_Name: l.screenName,
+      Video_Played: l.currentProduct || 'None',
+      Resolution: l.resolution,
+      Price: l.rentPrice,
+      Agreement_Start: l.agreementStart,
+      Agreement_End: l.agreementEnd,
       Status: l.status
     }));
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "LCD_Screens");
-    XLSX.writeFile(wb, `LCD_Screens_${new Date().toISOString().split('T')[0]}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "LCD_Registration");
+    XLSX.writeFile(wb, `LCD_Registration_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   return (
@@ -169,9 +173,9 @@ export const LCDScreensView: React.FC = () => {
         <div>
           <h1 className="text-xl font-bold text-white flex items-center gap-2">
             <Monitor className="w-5 h-5 text-purple-400" />
-            <span>LCD Screens Roster & Location Management</span>
+            <span>LCD Screen Registration</span>
           </h1>
-          <p className="text-xs text-slate-400 mt-0.5">Manage indoor mall displays, supermarket screens, and digital wall leases</p>
+          <p className="text-xs text-slate-400 mt-0.5">Manage registered LCD screens, vendors, pricing, and video playback agreements</p>
         </div>
 
         <div className="flex items-center gap-2">
@@ -181,7 +185,7 @@ export const LCDScreensView: React.FC = () => {
               className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <Download className="w-4 h-4 text-slate-400" />
-              <span>Export CSV</span>
+              <span>Export Excel</span>
             </button>
           )}
 
@@ -191,7 +195,15 @@ export const LCDScreensView: React.FC = () => {
                 setEditingLCD(null);
                 setScreenId(`LCD-${Math.floor(100 + Math.random() * 900)}`);
                 setScreenName('');
-                setLocation('');
+                setVideoPlayed('');
+                setResolution('4K UHD');
+                setRentPrice(800);
+                setAgreementStart('2026-08-01');
+                setAgreementEnd('2026-09-30');
+                setStatus('Active');
+                setLocation('Mogadishu');
+                setExactAddress('Main Area');
+                setScreenSize('85 inch');
                 setIsModalOpen(true);
               }}
               className="px-4 py-2 bg-purple-500 hover:bg-purple-400 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-purple-500/20 flex items-center gap-1.5 transition-all cursor-pointer"
@@ -261,7 +273,7 @@ export const LCDScreensView: React.FC = () => {
               type="text"
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Search screen ID, venue name..."
+              placeholder="Search screen ID, vendor name, video..."
               className="w-full pl-9 pr-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-white text-xs focus:outline-none"
             />
           </div>
@@ -280,11 +292,11 @@ export const LCDScreensView: React.FC = () => {
                   </button>
                 </th>
                 <th className="py-3 px-4 font-semibold">Screen ID</th>
-                <th className="py-3 px-4 font-semibold">Display Name & Venue</th>
-                <th className="py-3 px-4 font-semibold text-center">Size</th>
-                <th className="py-3 px-4 font-semibold text-center">Active Playlist</th>
-                <th className="py-3 px-4 font-semibold text-right">Rent / Month</th>
-                <th className="py-3 px-4 font-semibold text-center">Days Remaining</th>
+                <th className="py-3 px-4 font-semibold">Screen/Vendor Name</th>
+                <th className="py-3 px-4 font-semibold">Video Played</th>
+                <th className="py-3 px-4 font-semibold text-center">Resolution</th>
+                <th className="py-3 px-4 font-semibold text-right">Price / Month</th>
+                <th className="py-3 px-4 font-semibold text-center">Agreement Dates</th>
                 <th className="py-3 px-4 font-semibold text-center">Status</th>
                 <th className="py-3 px-4 font-semibold text-right">Actions</th>
               </tr>
@@ -293,7 +305,6 @@ export const LCDScreensView: React.FC = () => {
               {filtered.map(lcd => {
                 const endDate = new Date(lcd.agreementEnd);
                 const diffDays = Math.ceil((endDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
-                const activeVideosCount = lcdVideos.filter(v => v.screenId === lcd.id && (v.status === 'Showing' || v.status === 'Approved')).length;
                 const isSelected = selectedIds.includes(lcd.id);
 
                 return (
@@ -307,26 +318,26 @@ export const LCDScreensView: React.FC = () => {
                       </button>
                     </td>
                     <td className="py-3.5 px-4 font-mono font-bold text-purple-400">{lcd.screenId}</td>
+                    <td className="py-3.5 px-4 font-bold text-white">{lcd.screenName}</td>
                     <td className="py-3.5 px-4">
-                      <div className="font-bold text-white text-sm">{lcd.screenName}</div>
-                      <div className="text-[11px] text-slate-400">{lcd.location} ({lcd.exactAddress})</div>
-                    </td>
-                    <td className="py-3.5 px-4 text-center font-mono">{lcd.screenSize}</td>
-                    <td className="py-3.5 px-4 text-center">
-                      <span className="font-bold text-amber-400 font-mono">{activeVideosCount} Videos</span>
-                    </td>
-                    <td className="py-3.5 px-4 text-right font-mono font-bold text-white">${lcd.rentPrice.toLocaleString()}</td>
-                    <td className="py-3.5 px-4 text-center">
-                      <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-mono font-bold ${
-                        diffDays <= 10
-                          ? 'bg-rose-950 text-rose-300 border border-rose-800'
-                          : 'bg-slate-800 text-slate-300'
-                      }`}>
-                        {diffDays > 0 ? `Expires in ${diffDays} days` : 'Expired'}
+                      <span className="inline-block px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-800 text-amber-400 border border-slate-700">
+                        {lcd.currentProduct || 'None'}
                       </span>
                     </td>
+                    <td className="py-3.5 px-4 text-center font-mono text-slate-400">{lcd.resolution}</td>
+                    <td className="py-3.5 px-4 text-right font-mono font-bold text-white">${lcd.rentPrice.toLocaleString()}</td>
+                    <td className="py-3.5 px-4 text-center text-[11px] text-slate-400">
+                      <div>{lcd.agreementStart}</div>
+                      <div className="text-[10px] text-slate-500 font-mono">to {lcd.agreementEnd}</div>
+                    </td>
                     <td className="py-3.5 px-4 text-center">
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-950 text-purple-300 border border-purple-800">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        lcd.status === 'Active'
+                          ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                          : lcd.status === 'Maintenance'
+                          ? 'bg-slate-800 text-slate-400 border border-slate-700'
+                          : 'bg-rose-950 text-rose-300 border border-rose-800'
+                      }`}>
                         {lcd.status}
                       </span>
                     </td>
@@ -337,8 +348,15 @@ export const LCDScreensView: React.FC = () => {
                             setEditingLCD(lcd);
                             setScreenId(lcd.screenId);
                             setScreenName(lcd.screenName);
-                            setLocation(lcd.location);
+                            setVideoPlayed(lcd.currentProduct || '');
+                            setResolution(lcd.resolution);
                             setRentPrice(lcd.rentPrice);
+                            setAgreementStart(lcd.agreementStart);
+                            setAgreementEnd(lcd.agreementEnd);
+                            setStatus(lcd.status);
+                            setLocation(lcd.location || 'Mogadishu');
+                            setExactAddress(lcd.exactAddress || 'Main Area');
+                            setScreenSize(lcd.screenSize || '85 inch');
                             setIsModalOpen(true);
                           }}
                           className="p-1.5 rounded-lg text-slate-400 hover:text-purple-400 hover:bg-slate-800 cursor-pointer"
@@ -370,7 +388,7 @@ export const LCDScreensView: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs">
           <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl">
             <h3 className="text-base font-bold text-white mb-1">
-              {editingLCD ? `Edit LCD Screen: ${editingLCD.screenId}` : 'Register New LCD Display'}
+              {editingLCD ? `Edit LCD Screen: ${editingLCD.screenId}` : 'Register New LCD Screen'}
             </h3>
             <p className="text-xs text-slate-400 mb-4">Indoor digital display details & venue agreement terms</p>
 
@@ -388,13 +406,13 @@ export const LCDScreensView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-slate-300 mb-1">Display Name *</label>
+                  <label className="block font-semibold text-slate-300 mb-1">Screen/Vendor Name *</label>
                   <input
                     type="text"
                     required
                     value={screenName}
                     onChange={e => setScreenName(e.target.value)}
-                    placeholder="Main Entrance Video Wall"
+                    placeholder="Mogadishu Mall Atrium Wall"
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white"
                   />
                 </div>
@@ -402,64 +420,61 @@ export const LCDScreensView: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-300 mb-1">Venue / City Location *</label>
+                  <label className="block font-semibold text-slate-300 mb-1">Video Played *</label>
                   <input
                     type="text"
                     required
-                    value={location}
-                    onChange={e => setLocation(e.target.value)}
-                    placeholder="Mogadishu City Center"
+                    value={videoPlayed}
+                    onChange={e => setVideoPlayed(e.target.value)}
+                    placeholder="e.g. Hormuud 5G Launch Video"
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-slate-300 mb-1">Exact Address</label>
+                  <label className="block font-semibold text-slate-300 mb-1">Screen Resolution *</label>
                   <input
                     type="text"
-                    value={exactAddress}
-                    onChange={e => setExactAddress(e.target.value)}
-                    placeholder="Ground Floor Atrium"
+                    required
+                    value={resolution}
+                    onChange={e => setResolution(e.target.value)}
+                    placeholder="e.g. 4K UHD or 1080p FHD"
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-300 mb-1">Screen Size</label>
-                  <input
-                    type="text"
-                    value={screenSize}
-                    onChange={e => setScreenSize(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-300 mb-1">Resolution</label>
-                  <input
-                    type="text"
-                    value={resolution}
-                    onChange={e => setResolution(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-300 mb-1">Rent / Mo ($)</label>
+                  <label className="block font-semibold text-slate-300 mb-1">Price ($) *</label>
                   <input
                     type="number"
+                    required
                     value={rentPrice}
                     onChange={e => setRentPrice(Number(e.target.value))}
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono"
                   />
                 </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">Status</label>
+                  <select
+                    value={status}
+                    onChange={e => setStatus(e.target.value as LCDStatus)}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white"
+                  >
+                    <option value="Active">Active</option>
+                    <option value="Available">Available</option>
+                    <option value="Reserved">Reserved</option>
+                    <option value="Expired">Expired</option>
+                    <option value="Maintenance">Maintenance</option>
+                  </select>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-300 mb-1">Agreement Start</label>
+                  <label className="block font-semibold text-slate-300 mb-1">Agreement Start Date</label>
                   <input
                     type="date"
                     value={agreementStart}
@@ -469,12 +484,34 @@ export const LCDScreensView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-slate-300 mb-1">Agreement End</label>
+                  <label className="block font-semibold text-slate-300 mb-1">Agreement End Date</label>
                   <input
                     type="date"
                     value={agreementEnd}
                     onChange={e => setAgreementEnd(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Advanced / Optional sections collapsed inside layout but kept as data mapping */}
+              <div className="pt-2 border-t border-slate-800 grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-400 mb-1">Venue / City Location (Optional)</label>
+                  <input
+                    type="text"
+                    value={location}
+                    onChange={e => setLocation(e.target.value)}
+                    className="w-full px-3 py-1.5 bg-slate-800/40 border border-slate-700 rounded-lg text-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-400 mb-1">Screen Physical Size (Optional)</label>
+                  <input
+                    type="text"
+                    value={screenSize}
+                    onChange={e => setScreenSize(e.target.value)}
+                    className="w-full px-3 py-1.5 bg-slate-800/40 border border-slate-700 rounded-lg text-slate-300"
                   />
                 </div>
               </div>
