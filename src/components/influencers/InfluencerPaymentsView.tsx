@@ -12,7 +12,8 @@ import {
   ChevronDown,
   DollarSign,
   Calendar,
-  UserCheck
+  UserCheck,
+  Phone
 } from 'lucide-react';
 import { store } from '../../services/store';
 import { CentralPayment, CentralPaymentStatus } from '../../types';
@@ -62,20 +63,24 @@ export const InfluencerPaymentsView: React.FC = () => {
   };
 
   const getExportData = () => {
-    return filtered.map(pay => ({
-      'Payment ID': pay.paymentId,
-      'Recipient (Influencer)': pay.recipient,
-      'Payment Type': pay.paymentType,
-      'Reference / Period': pay.reference,
-      'Amount (USD)': pay.amount,
-      'Due Date': pay.dueDate,
-      'Status': pay.status,
-      'Payment Date': pay.paymentDate || 'N/A',
-      'Payment Method': pay.paymentMethod || 'N/A',
-      'Transaction Ref': pay.paymentReference || 'N/A',
-      'Notes': pay.notes || '',
-      'Created Date': pay.createdAt || 'N/A'
-    }));
+    return filtered.map(pay => {
+      const phone = store.getInfluencerPhone(pay);
+      return {
+        'Payment ID': pay.paymentId,
+        'Recipient (Influencer)': pay.recipient,
+        'Influencer Phone Number': phone,
+        'Payment Type': pay.paymentType,
+        'Reference / Period': pay.reference,
+        'Amount (USD)': pay.amount,
+        'Due Date': pay.dueDate,
+        'Status': pay.status,
+        'Payment Date': pay.paymentDate || 'N/A',
+        'Payment Method': pay.paymentMethod || 'N/A',
+        'Transaction Ref': pay.paymentReference || 'N/A',
+        'Notes': pay.notes || '',
+        'Created Date': pay.createdAt || 'N/A'
+      };
+    });
   };
 
   const handleExportExcel = () => {
@@ -108,6 +113,8 @@ export const InfluencerPaymentsView: React.FC = () => {
 
   const handleGeneratePDFInvoice = (pay: CentralPayment) => {
     const doc = new jsPDF();
+    const phone = store.getInfluencerPhone(pay);
+
     doc.setFontSize(20);
     doc.setTextColor(234, 179, 8); // amber
     doc.text('INFLUENCER PAYMENT INVOICE', 14, 22);
@@ -123,13 +130,24 @@ export const InfluencerPaymentsView: React.FC = () => {
     doc.setFontSize(12);
     doc.setTextColor(0);
     doc.text(`Recipient: ${pay.recipient}`, 14, 55);
-    doc.text(`Payment Details: ${pay.notes || pay.reference}`, 14, 63);
-    doc.text(`Due Date: ${pay.dueDate}`, 14, 71);
-    doc.text(`Current Payment Status: ${pay.status}`, 14, 79);
+    if (phone && phone !== 'N/A') {
+      doc.text(`Phone: ${phone}`, 14, 63);
+      doc.text(`Payment Details: ${pay.notes || pay.reference}`, 14, 71);
+      doc.text(`Due Date: ${pay.dueDate}`, 14, 79);
+      doc.text(`Current Payment Status: ${pay.status}`, 14, 87);
 
-    doc.setFontSize(16);
-    doc.setTextColor(16, 185, 129); // emerald
-    doc.text(`Total Amount: $${pay.amount.toFixed(2)} USD`, 14, 95);
+      doc.setFontSize(16);
+      doc.setTextColor(16, 185, 129); // emerald
+      doc.text(`Total Amount: $${pay.amount.toFixed(2)} USD`, 14, 103);
+    } else {
+      doc.text(`Payment Details: ${pay.notes || pay.reference}`, 14, 63);
+      doc.text(`Due Date: ${pay.dueDate}`, 14, 71);
+      doc.text(`Current Payment Status: ${pay.status}`, 14, 79);
+
+      doc.setFontSize(16);
+      doc.setTextColor(16, 185, 129); // emerald
+      doc.text(`Total Amount: $${pay.amount.toFixed(2)} USD`, 14, 95);
+    }
 
     doc.save(`Invoice_${pay.paymentId}.pdf`);
   };
@@ -306,7 +324,19 @@ export const InfluencerPaymentsView: React.FC = () => {
                 filtered.map(pay => (
                   <tr key={pay.id} className="hover:bg-slate-800/40 transition-colors">
                     <td className="py-3.5 px-4 font-mono font-bold text-amber-400">{pay.paymentId}</td>
-                    <td className="py-3.5 px-4 font-bold text-white">{pay.recipient}</td>
+                    <td className="py-3.5 px-4">
+                      <div className="font-bold text-white">{pay.recipient}</div>
+                      {(() => {
+                        const phone = store.getInfluencerPhone(pay);
+                        if (!phone || phone === 'N/A') return null;
+                        return (
+                          <div className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5 font-mono">
+                            <Phone className="w-3 h-3 text-emerald-400 shrink-0" />
+                            <span>{phone}</span>
+                          </div>
+                        );
+                      })()}
+                    </td>
                     <td className="py-3.5 px-4 text-slate-300">{pay.reference}</td>
                     <td className="py-3.5 px-4 text-right font-mono font-bold text-white">${pay.amount.toFixed(2)}</td>
                     <td className="py-3.5 px-4 text-center font-mono text-slate-400">{pay.dueDate}</td>

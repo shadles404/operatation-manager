@@ -644,6 +644,7 @@ class StoreService {
         paymentId: `INF-${Math.floor(1000 + Math.random()*9000)}`,
         paymentType: 'Influencer',
         recipient: newInf.fullName,
+        recipientPhone: newInf.phone,
         reference: `Salary (${currentMonth})`,
         amount: newInf.salary,
         currency: 'USD',
@@ -792,6 +793,7 @@ class StoreService {
       paymentId: deliveryId,
       paymentType: 'Influencer',
       recipient: `${del.influencerName} (${del.product})`,
+      recipientPhone: this.influencers.find(i => i.id === del.influencerId)?.phone,
       reference: deliveryId,
       amount: totalPrice,
       currency: 'USD',
@@ -1843,6 +1845,68 @@ class StoreService {
     return this.payments;
   }
 
+  /**
+   * Resolve an influencer's phone number from payment record and store entities.
+   */
+  public getInfluencerPhone(pay: CentralPayment): string {
+    if (pay.recipientPhone && pay.recipientPhone.trim()) {
+      return pay.recipientPhone.trim();
+    }
+
+    // 1. Match directly by relatedEntityId against Influencers
+    if (pay.relatedEntityId) {
+      const inf = this.influencers.find(i => i.id === pay.relatedEntityId);
+      if (inf?.phone && inf.phone.trim()) return inf.phone.trim();
+    }
+
+    // 2. Match if relatedEntityId is a DeliveryRecord
+    if (pay.relatedEntityId) {
+      const del = this.deliveries.find(d => d.id === pay.relatedEntityId || d.deliveryId === pay.relatedEntityId);
+      if (del) {
+        const inf = this.influencers.find(
+          i => i.id === del.influencerId || (del.influencerName && i.fullName.trim().toLowerCase() === del.influencerName.trim().toLowerCase())
+        );
+        if (inf?.phone && inf.phone.trim()) return inf.phone.trim();
+      }
+    }
+
+    // 3. Match by recipient name
+    if (pay.recipient) {
+      const rawRecipient = pay.recipient.trim().toLowerCase();
+
+      // Exact match
+      const exactInf = this.influencers.find(i => i.fullName.trim().toLowerCase() === rawRecipient);
+      if (exactInf?.phone && exactInf.phone.trim()) return exactInf.phone.trim();
+
+      // Clean recipient string (handles names formatted like "Aya Ahmed (Product)" or "Aya Ahmed (INF-001)")
+      const cleanName = rawRecipient.replace(/\s*\([^)]*\)/g, '').trim();
+      if (cleanName) {
+        const cleanedMatch = this.influencers.find(i => i.fullName.trim().toLowerCase() === cleanName);
+        if (cleanedMatch?.phone && cleanedMatch.phone.trim()) return cleanedMatch.phone.trim();
+      }
+
+      // Fuzzy containment match
+      const fuzzyMatch = this.influencers.find(i => {
+        const infName = i.fullName.trim().toLowerCase();
+        return infName && (rawRecipient.includes(infName) || infName.includes(rawRecipient));
+      });
+      if (fuzzyMatch?.phone && fuzzyMatch.phone.trim()) return fuzzyMatch.phone.trim();
+    }
+
+    // 4. Match by reference containing a delivery ID
+    if (pay.reference) {
+      const del = this.deliveries.find(d => d.deliveryId && pay.reference.includes(d.deliveryId));
+      if (del) {
+        const inf = this.influencers.find(
+          i => i.id === del.influencerId || (del.influencerName && i.fullName.trim().toLowerCase() === del.influencerName.trim().toLowerCase())
+        );
+        if (inf?.phone && inf.phone.trim()) return inf.phone.trim();
+      }
+    }
+
+    return 'N/A';
+  }
+
   public async addPayment(pay: Omit<CentralPayment, 'id' | 'createdAt'>): Promise<{ success: boolean; data?: CentralPayment; error?: string }> {
     const newPay: CentralPayment = {
       ...pay,
@@ -2000,6 +2064,7 @@ class StoreService {
           paymentId: `INF-${Math.floor(1000 + Math.random()*9000)}`,
           paymentType: 'Influencer',
           recipient: inf.fullName,
+          recipientPhone: inf.phone,
           reference: `Retainer - ${period}`,
           amount: inf.salary,
           currency: 'USD',

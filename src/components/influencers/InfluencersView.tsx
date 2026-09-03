@@ -64,6 +64,7 @@ export const InfluencersView: React.FC = () => {
     const exportData = filtered.map(i => ({
       ID: i.id,
       FullName: i.fullName,
+      Phone: i.phone,
       Category: i.category,
       TikTok: i.tiktokUsername,
       TargetVideos: i.targetVideosPerMonth,

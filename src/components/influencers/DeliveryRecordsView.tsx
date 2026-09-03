@@ -149,17 +149,23 @@ export const DeliveryRecordsView: React.FC = () => {
       setPermissionError('Permission denied: You do not have permission to export delivery records');
       return;
     }
-    const exportData = filtered.map(d => ({
-      DeliveryID: d.deliveryId,
-      Influencer: d.influencerName,
-      Product: d.product,
-      Quantity: d.quantity,
-      Date: d.date,
-      UnitPrice: d.unitPrice,
-      TotalPrice: d.totalPrice,
-      DeliveryStatus: d.deliveryStatus,
-      PaymentStatus: d.paymentStatus,
-    }));
+    const exportData = filtered.map(d => {
+      const inf = store.getInfluencers().find(
+        i => i.id === d.influencerId || i.fullName.toLowerCase() === d.influencerName.toLowerCase()
+      );
+      return {
+        DeliveryID: d.deliveryId,
+        Influencer: d.influencerName,
+        InfluencerPhone: inf?.phone || 'N/A',
+        Product: d.product,
+        Quantity: d.quantity,
+        Date: d.date,
+        UnitPrice: d.unitPrice,
+        TotalPrice: d.totalPrice,
+        DeliveryStatus: d.deliveryStatus,
+        PaymentStatus: d.paymentStatus,
+      };
+    });
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Deliveries");

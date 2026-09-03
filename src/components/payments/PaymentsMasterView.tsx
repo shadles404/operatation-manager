@@ -223,20 +223,24 @@ export const PaymentsMasterView: React.FC<PaymentsMasterViewProps> = ({ initialF
   const activeSum = getActiveEntitiesSummary();
 
   const getExportData = () => {
-    return filtered.map(pay => ({
-      'Payment ID': pay.paymentId,
-      'Recipient': pay.recipient,
-      'Type': pay.paymentType,
-      'Reference / Period': pay.reference,
-      'Amount (USD)': pay.amount,
-      'Due Date': pay.dueDate,
-      'Status': pay.status,
-      'Payment Date': pay.paymentDate || 'N/A',
-      'Payment Method': pay.paymentMethod || 'N/A',
-      'Transaction Ref': pay.paymentReference || 'N/A',
-      'Notes': pay.notes || '',
-      'Created Date': pay.createdAt || 'N/A'
-    }));
+    return filtered.map(pay => {
+      const influencerPhone = pay.paymentType === 'Influencer' ? store.getInfluencerPhone(pay) : 'N/A';
+      return {
+        'Payment ID': pay.paymentId,
+        'Recipient': pay.recipient,
+        'Influencer Phone Number': influencerPhone,
+        'Type': pay.paymentType,
+        'Reference / Period': pay.reference,
+        'Amount (USD)': pay.amount,
+        'Due Date': pay.dueDate,
+        'Status': pay.status,
+        'Payment Date': pay.paymentDate || 'N/A',
+        'Payment Method': pay.paymentMethod || 'N/A',
+        'Transaction Ref': pay.paymentReference || 'N/A',
+        'Notes': pay.notes || '',
+        'Created Date': pay.createdAt || 'N/A'
+      };
+    });
   };
 
   const handleExportExcel = () => {

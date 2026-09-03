@@ -248,6 +248,7 @@ export interface CentralPayment {
   paymentId: string; // e.g. INF-0021, BB-0081, LCD-0012, EXP-901
   paymentType: CentralPaymentType;
   recipient: string;
+  recipientPhone?: string;
   reference: string;
   amount: number;
   currency: string;
