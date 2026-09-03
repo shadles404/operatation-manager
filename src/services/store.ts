@@ -41,7 +41,13 @@ import {
   PermissionAction
 } from '../types';
 import { fullAdminPermissions } from '../data/initialData';
-import { toMonthKey, toMonthDisplay, getCurrentMonthKey } from '../utils/budgetUtils';
+import {
+  toMonthKey,
+  toMonthDisplay,
+  getCurrentMonthKey,
+  getTodayDate,
+  getMonthDateRange
+} from '../utils/budgetUtils';
 
 const STORAGE_KEYS = {
   CURRENT_USER: 'mop_current_user_v2',
@@ -247,11 +253,416 @@ class StoreService {
       }
       this.recalculateAll();
       this.notifyListeners();
+      this.scheduleCycleCheck();
     }, err => {
       console.warn(`Firestore snapshot notice for ${colName}:`, err.message);
     });
 
     this.snapshotUnsubs.push(unsub);
+  }
+
+  private isEnsuringCycle = false;
+  private cycleCheckTimer: any = null;
+
+  private scheduleCycleCheck() {
+    if (this.cycleCheckTimer) clearTimeout(this.cycleCheckTimer);
+    this.cycleCheckTimer = setTimeout(() => {
+      if (this.influencers.length > 0 || this.budgets.length > 0) {
+        this.ensureMonthlyCycle().catch(e => console.warn('Auto monthly cycle check notice:', e.message));
+      }
+    }, 600);
+  }
+
+  /**
+   * Automatically switches the system to the specified or current month cycle.
+   * Resets monthly tracking as new:
+   * - Fresh influencer targets (completedVideos: 0, targetVideos from influencer agreement)
+   * - Pending monthly payments for active influencers, billboards, and LCD screens
+   * - Preserves budget: carries forward previous allocations so budget does NOT reset to $0
+   * - Marks expired outdoor media & ended video campaigns
+   * - Keeps all previous months' data intact as historical records!
+   */
+  public async ensureMonthlyCycle(targetMonthKey?: string): Promise<{ success: boolean; month: string; createdTargets: number; createdPayments: number; error?: string }> {
+    if (this.isEnsuringCycle) {
+      return { success: true, month: targetMonthKey || getCurrentMonthKey(), createdTargets: 0, createdPayments: 0 };
+    }
+    this.isEnsuringCycle = true;
+    try {
+      const targetMonth = toMonthKey(targetMonthKey || getCurrentMonthKey());
+      const period = toMonthDisplay(targetMonth);
+      const { startDate, endDate } = getMonthDateRange(targetMonth);
+      let createdTargets = 0;
+      let createdPayments = 0;
+
+      // 1. Influencer Targets for targetMonth:
+      // For each active influencer, ensure a fresh target record exists for targetMonth with completedVideos: 0
+      for (const inf of this.influencers) {
+        if (inf.status !== 'Active') continue;
+        const hasTarget = this.targets.some(t => t.influencerId === inf.id && t.monthYear === targetMonth);
+        if (!hasTarget) {
+          const newTarget: InfluencerTarget = {
+            id: `trg-${inf.id}-${targetMonth}`,
+            influencerId: inf.id,
+            influencerName: inf.fullName,
+            monthYear: targetMonth,
+            targetVideos: Number(inf.targetVideosPerMonth) || 4,
+            completedVideos: 0,
+            remainingVideos: Number(inf.targetVideosPerMonth) || 4,
+            achievementPercent: 0,
+            status: 'Below Target',
+            updatedAt: new Date().toISOString(),
+          };
+          this.targets.push(newTarget);
+          await setDoc(doc(db, 'targets', newTarget.id), sanitizeFirestoreData(newTarget)).catch(e => console.error('Target save error:', e));
+          createdTargets++;
+        }
+      }
+
+      // 2. Budget Persistence:
+      // The budget should NOT automatically reset. Keep the budget available for the new month,
+      // carrying forward the previous allocations so the admin can change it only when needed.
+      const budgetTypes: BudgetType[] = ['Local', 'International'];
+      for (const bType of budgetTypes) {
+        const hasBudget = this.budgets.some(b => b.budgetType === bType && toMonthKey(b.month || b.period || '') === targetMonth);
+        if (!hasBudget) {
+          const sorted = this.budgets
+            .filter(b => b.budgetType === bType)
+            .sort((a, b) => (b.month || '').localeCompare(a.month || ''));
+          const template = sorted[0];
+          const carriedTotal = template?.totalBudget !== undefined
+            ? template.totalBudget
+            : (template?.allocated ?? (bType === 'Local' ? 3000 : 2000));
+          const carriedAllocations = template?.categoryAllocations || (bType === 'Local'
+            ? { Influencers: 1500, Billboards: 1000, 'LCD Screens': 500 }
+            : { Influencers: 1200, Other: 800 });
+
+          // Actual expenses logged for this month
+          const actualSpent = this.expenses
+            .filter(e => e.budgetType === bType && toMonthKey(e.date) === targetMonth)
+            .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+
+          const newBudget: Budget = {
+            id: `bdg_${bType.toLowerCase()}_${targetMonth}`,
+            budgetId: `BDG-${bType.toUpperCase().slice(0, 3)}-${targetMonth.replace('-', '')}`,
+            month: targetMonth,
+            period,
+            budgetType: bType,
+            totalBudget: carriedTotal,
+            allocated: carriedTotal,
+            spent: actualSpent,
+            remaining: carriedTotal - actualSpent,
+            warningLevel: 'Normal',
+            categoryAllocations: carriedAllocations,
+            updatedAt: new Date().toISOString(),
+            updatedBy: 'System (Monthly Cycle)',
+            createdAt: new Date().toISOString()
+          };
+          this.budgets.push(newBudget);
+          await setDoc(doc(db, 'budgets', newBudget.id), sanitizeFirestoreData(newBudget)).catch(e => console.error('Budget save error:', e));
+        }
+      }
+
+      // 3. Influencer Monthly Salary Payments for targetMonth:
+      for (const inf of this.influencers) {
+        if (inf.status !== 'Active' || !inf.salary || inf.salary <= 0) continue;
+        if (inf.agreementStart && inf.agreementEnd) {
+          if (inf.agreementStart > endDate || inf.agreementEnd < startDate) continue;
+        }
+        const hasPayment = this.payments.some(p =>
+          p.relatedEntityId === inf.id &&
+          p.paymentType === 'Influencer' &&
+          (p.reference.includes(period) || p.reference.includes(targetMonth))
+        );
+        if (!hasPayment) {
+          const newPay: CentralPayment = {
+            id: `pay-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
+            paymentId: `INF-${Math.floor(1000 + Math.random() * 9000)}`,
+            paymentType: 'Influencer',
+            recipient: inf.fullName,
+            recipientPhone: inf.phone,
+            reference: `Retainer - ${period}`,
+            amount: inf.salary,
+            currency: 'USD',
+            dueDate: endDate,
+            status: 'Pending Approval',
+            relatedEntityId: inf.id,
+            budgetType: 'Local',
+            notes: `Monthly agreement retainer salary for ${inf.fullName} for ${period}`,
+            createdAt: new Date().toISOString()
+          };
+          this.payments.push(newPay);
+          await setDoc(doc(db, 'payments', newPay.id), sanitizeFirestoreData(newPay)).catch(e => console.error('Payment save error:', e));
+          createdPayments++;
+        }
+      }
+
+      // 4. Billboard Monthly Rent Payments for targetMonth:
+      for (const bb of this.billboards) {
+        if (bb.status !== 'Active' || !bb.rentPrice) continue;
+        if (bb.agreementStart <= endDate && bb.agreementEnd >= startDate) {
+          const hasPayment = this.payments.some(p =>
+            p.relatedEntityId === bb.id &&
+            p.paymentType === 'Billboard' &&
+            (p.reference.includes(period) || p.reference.includes(targetMonth))
+          );
+          if (!hasPayment) {
+            const newPay: CentralPayment = {
+              id: `pay-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
+              paymentId: `BB-${Math.floor(1000 + Math.random() * 9000)}`,
+              paymentType: 'Billboard',
+              recipient: `${bb.ownerProvider} (${bb.billboardId})`,
+              reference: `Rent - ${period}`,
+              amount: bb.rentPrice,
+              currency: bb.currency || 'USD',
+              dueDate: endDate,
+              status: 'Pending Approval',
+              relatedEntityId: bb.id,
+              budgetType: 'Local',
+              notes: `Monthly billboard lease rent for ${bb.location} (${bb.billboardId}) for ${period}`,
+              createdAt: new Date().toISOString()
+            };
+            this.payments.push(newPay);
+            await setDoc(doc(db, 'payments', newPay.id), sanitizeFirestoreData(newPay)).catch(e => console.error('BB payment save error:', e));
+            createdPayments++;
+          }
+        }
+      }
+
+      // 5. LCD Screen Monthly Rent Payments for targetMonth:
+      for (const lcd of this.lcdScreens) {
+        if (lcd.status !== 'Active' || !lcd.rentPrice) continue;
+        if (lcd.agreementStart <= endDate && lcd.agreementEnd >= startDate) {
+          const hasPayment = this.payments.some(p =>
+            p.relatedEntityId === lcd.id &&
+            p.paymentType === 'LCD Screen' &&
+            (p.reference.includes(period) || p.reference.includes(targetMonth))
+          );
+          if (!hasPayment) {
+            const newPay: CentralPayment = {
+              id: `pay-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
+              paymentId: `LCD-${Math.floor(1000 + Math.random() * 9000)}`,
+              paymentType: 'LCD Screen',
+              recipient: `${lcd.ownerProvider} (${lcd.screenId})`,
+              reference: `Rent - ${period}`,
+              amount: lcd.rentPrice,
+              currency: lcd.currency || 'USD',
+              dueDate: endDate,
+              status: 'Pending Approval',
+              relatedEntityId: lcd.id,
+              budgetType: 'Local',
+              notes: `Monthly LCD screen venue lease for ${lcd.screenName} (${lcd.screenId}) for ${period}`,
+              createdAt: new Date().toISOString()
+            };
+            this.payments.push(newPay);
+            await setDoc(doc(db, 'payments', newPay.id), sanitizeFirestoreData(newPay)).catch(e => console.error('LCD payment save error:', e));
+            createdPayments++;
+          }
+        }
+      }
+
+      // 6. Check LCD Video status for ended playlists:
+      for (const vid of this.lcdVideos) {
+        if (vid.status === 'Showing' && vid.endDate && vid.endDate < startDate) {
+          vid.status = 'Ended';
+          setDoc(doc(db, 'lcd_videos', vid.id), sanitizeFirestoreData(vid)).catch(e => console.error(e));
+        }
+      }
+
+      if (createdTargets > 0 || createdPayments > 0) {
+        this.logAudit(
+          'Automated Monthly Cycle Initialized',
+          'influencer_payments',
+          period,
+          undefined,
+          `Initialized monthly cycle for ${period}: ${createdTargets} new targets, ${createdPayments} new payments.`
+        );
+      }
+
+      this.recalculateAll();
+      this.notifyListeners();
+      return { success: true, month: targetMonth, createdTargets, createdPayments };
+    } catch (err: any) {
+      console.error('Error during monthly cycle initialization:', err);
+      return { success: false, month: targetMonthKey || getCurrentMonthKey(), createdTargets: 0, createdPayments: 0, error: err.message };
+    } finally {
+      this.isEnsuringCycle = false;
+    }
+  }
+
+  /**
+   * Resets active monthly operational metrics for a fresh September 2026 cycle:
+   * - Keeps influencer registrations/profiles, outdoor billboards, LCD screens, and all permanent records intact.
+   * - Preserves August data as historical records in Firestore (does NOT delete August data).
+   * - For September: Resets influencer payments to 0 paid (pending/unpaid state), targets to new (targetVideos set, completedVideos: 0, status: 'Below Target'), and resets monthly tracking to fresh state.
+   * - Supports Event Payments with Paid, Pending, and Unpaid statuses.
+   */
+  public async startFreshSeptemberCycle(): Promise<{ success: boolean; month: string; message?: string; error?: string }> {
+    try {
+      const septKey = '2026-09';
+      const septDisplay = 'September 2026';
+      const { endDate } = getMonthDateRange(septKey);
+
+      // 1. Ensure all active influencers have a fresh target for September with completedVideos: 0
+      for (const inf of this.influencers) {
+        if (inf.status !== 'Active') continue;
+        const existingSeptTarget = this.targets.find(t => t.influencerId === inf.id && t.monthYear === septKey);
+        const targetCount = Number(inf.targetVideosPerMonth) || 4;
+
+        if (existingSeptTarget) {
+          existingSeptTarget.completedVideos = 0;
+          existingSeptTarget.targetVideos = targetCount;
+          existingSeptTarget.remainingVideos = targetCount;
+          existingSeptTarget.achievementPercent = 0;
+          existingSeptTarget.status = 'Below Target';
+          existingSeptTarget.updatedAt = new Date().toISOString();
+          await setDoc(doc(db, 'targets', existingSeptTarget.id), sanitizeFirestoreData(existingSeptTarget)).catch(e => console.error(e));
+        } else {
+          const newTarget: InfluencerTarget = {
+            id: `trg-${inf.id}-${septKey}`,
+            influencerId: inf.id,
+            influencerName: inf.fullName,
+            monthYear: septKey,
+            targetVideos: targetCount,
+            completedVideos: 0,
+            remainingVideos: targetCount,
+            achievementPercent: 0,
+            status: 'Below Target',
+            updatedAt: new Date().toISOString(),
+          };
+          this.targets.push(newTarget);
+          await setDoc(doc(db, 'targets', newTarget.id), sanitizeFirestoreData(newTarget)).catch(e => console.error(e));
+        }
+      }
+
+      // 2. Reset September Influencer Payments to 0 Paid (Pending Approval / Unpaid state)
+      for (const inf of this.influencers) {
+        if (inf.status !== 'Active' || !inf.salary || inf.salary <= 0) continue;
+        const existingSeptPayment = this.payments.find(p =>
+          p.relatedEntityId === inf.id &&
+          p.paymentType === 'Influencer' &&
+          (p.reference.includes(septDisplay) || p.reference.includes(septKey) || toMonthKey(p.dueDate || '') === septKey)
+        );
+
+        if (existingSeptPayment) {
+          existingSeptPayment.status = 'Pending Approval';
+          existingSeptPayment.paymentDate = undefined;
+          existingSeptPayment.paymentReference = undefined;
+          existingSeptPayment.paymentProof = undefined;
+          await setDoc(doc(db, 'payments', existingSeptPayment.id), sanitizeFirestoreData(existingSeptPayment)).catch(e => console.error(e));
+        } else {
+          const newPay: CentralPayment = {
+            id: `pay-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
+            paymentId: `INF-${Math.floor(1000 + Math.random() * 9000)}`,
+            paymentType: 'Influencer',
+            recipient: inf.fullName,
+            recipientPhone: inf.phone,
+            reference: `Retainer - ${septDisplay}`,
+            amount: inf.salary,
+            currency: 'USD',
+            dueDate: endDate,
+            status: 'Pending Approval',
+            relatedEntityId: inf.id,
+            budgetType: 'Local',
+            notes: `Monthly agreement retainer salary for ${inf.fullName} for ${septDisplay}`,
+            createdAt: new Date().toISOString()
+          };
+          this.payments.push(newPay);
+          await setDoc(doc(db, 'payments', newPay.id), sanitizeFirestoreData(newPay)).catch(e => console.error(e));
+        }
+      }
+
+      // 3. Ensure Fresh Budgets for September 2026 carrying forward configured allocations
+      const budgetTypes: BudgetType[] = ['Local', 'International'];
+      for (const bType of budgetTypes) {
+        let bDoc = this.budgets.find(b => b.budgetType === bType && toMonthKey(b.month || b.period || '') === septKey);
+        const template = this.budgets
+          .filter(b => b.budgetType === bType && toMonthKey(b.month || b.period || '') !== septKey)
+          .sort((a, b) => (b.month || '').localeCompare(a.month || ''))[0];
+
+        const carriedTotal = template?.totalBudget !== undefined
+          ? template.totalBudget
+          : (template?.allocated ?? (bType === 'Local' ? 3000 : 2000));
+        const carriedAllocations = template?.categoryAllocations || (bType === 'Local'
+          ? { Influencers: 1500, Billboards: 1000, 'LCD Screens': 500 }
+          : { Influencers: 1200, Other: 800 });
+
+        const actualSpent = this.expenses
+          .filter(e => e.budgetType === bType && toMonthKey(e.date) === septKey)
+          .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+
+        if (!bDoc) {
+          bDoc = {
+            id: `bdg_${bType.toLowerCase()}_${septKey}`,
+            budgetId: `BDG-${bType.toUpperCase().slice(0, 3)}-${septKey.replace('-', '')}`,
+            month: septKey,
+            period: septDisplay,
+            budgetType: bType,
+            totalBudget: carriedTotal,
+            allocated: carriedTotal,
+            spent: actualSpent,
+            remaining: carriedTotal - actualSpent,
+            warningLevel: 'Normal',
+            categoryAllocations: carriedAllocations,
+            updatedAt: new Date().toISOString(),
+            updatedBy: 'System (September Fresh Cycle)',
+            createdAt: new Date().toISOString()
+          };
+          this.budgets.push(bDoc);
+        } else {
+          bDoc.spent = actualSpent;
+          bDoc.remaining = (bDoc.totalBudget || bDoc.allocated) - actualSpent;
+          bDoc.warningLevel = 'Normal';
+        }
+        await setDoc(doc(db, 'budgets', bDoc.id), sanitizeFirestoreData(bDoc)).catch(e => console.error(e));
+      }
+
+      this.logAudit(
+        'Fresh September Cycle Initialized',
+        'influencer_payments',
+        septDisplay,
+        undefined,
+        'September 2026 cycle started completely fresh. Influencer payments reset to 0 paid, targets set to 0 completed videos, and August data preserved as historical records.'
+      );
+
+      this.recalculateAll();
+      this.notifyListeners();
+      return {
+        success: true,
+        month: septKey,
+        message: 'September 2026 cycle started fresh! Influencer payments reset to $0 paid, targets reset to 0 completed videos, and August records preserved.'
+      };
+    } catch (err: any) {
+      console.error('Error starting fresh September cycle:', err);
+      return { success: false, month: '2026-09', error: err.message || 'Failed to start fresh cycle' };
+    }
+  }
+
+  /**
+   * Returns list of all month keys (YYYY-MM) with historical records or active data,
+   * sorted in descending order (latest month first).
+   */
+  public getAvailableMonths(): string[] {
+    const months = new Set<string>();
+    months.add(getCurrentMonthKey());
+    this.targets.forEach(t => { if (t.monthYear) months.add(toMonthKey(t.monthYear)); });
+    this.budgets.forEach(b => { if (b.month) months.add(toMonthKey(b.month)); });
+    this.expenses.forEach(e => { if (e.date) months.add(toMonthKey(e.date)); });
+    this.payments.forEach(p => {
+      if (p.dueDate) months.add(toMonthKey(p.dueDate));
+      if (p.createdAt) months.add(toMonthKey(p.createdAt));
+      if (p.reference) {
+        const mKey = toMonthKey(p.reference);
+        if (/^\d{4}-\d{2}$/.test(mKey)) months.add(mKey);
+      }
+    });
+    // Ensure previous 6 months are also available
+    const now = new Date();
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      months.add(k);
+    }
+    return Array.from(months).filter(m => /^\d{4}-\d{2}$/.test(m)).sort().reverse();
   }
 
   public subscribe(fn: () => void): () => void {
@@ -1187,12 +1598,44 @@ class StoreService {
 
   /**
    * Retrieves the specific monthly budget for a budget pool (Local or International) and month.
+   * If a budget has not yet been saved for this specific month, it automatically carries forward
+   * the active configured budget total and category allocations so the budget does NOT reset to $0.
    */
   public getMonthlyBudget(budgetType: BudgetType, month: string): Budget | undefined {
     const monthKey = toMonthKey(month);
-    return this.budgets.find(
+    const found = this.budgets.find(
       b => b.budgetType === budgetType && toMonthKey(b.month || b.period || '') === monthKey
     );
+    if (found) return found;
+
+    // Budget Persistence: find the latest existing budget record to carry forward
+    const sorted = this.budgets
+      .filter(b => b.budgetType === budgetType)
+      .sort((a, b) => (b.month || '').localeCompare(a.month || ''));
+    if (sorted.length > 0) {
+      const template = sorted[0];
+      const actualSpent = this.expenses
+        .filter(e => e.budgetType === budgetType && toMonthKey(e.date) === monthKey)
+        .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+      const totalBudget = template.totalBudget !== undefined ? template.totalBudget : (template.allocated ?? 0);
+      return {
+        id: `bdg_${budgetType.toLowerCase()}_${monthKey}`,
+        budgetId: `BDG-${budgetType.toUpperCase().slice(0, 3)}-${monthKey.replace('-', '')}`,
+        month: monthKey,
+        period: toMonthDisplay(monthKey),
+        budgetType,
+        totalBudget,
+        allocated: totalBudget,
+        spent: actualSpent,
+        remaining: totalBudget - actualSpent,
+        warningLevel: 'Normal',
+        categoryAllocations: template.categoryAllocations || {},
+        updatedAt: new Date().toISOString(),
+        updatedBy: 'System (Preserved Budget)',
+        createdAt: new Date().toISOString()
+      };
+    }
+    return undefined;
   }
 
   /**
@@ -2171,22 +2614,25 @@ class StoreService {
 
   public getAlerts(): AlertItem[] {
     const alerts: AlertItem[] = [];
-    const todayStr = '2026-08-27';
-    const today = new Date(todayStr);
+    const todayStr = getTodayDate();
+    const today = new Date();
+    const currentMonth = getCurrentMonthKey();
 
-    this.targets.forEach(t => {
-      if (t.status === 'Below Target') {
-        alerts.push({
-          id: `alt-inf-trg-${t.id}`,
-          type: 'warning',
-          module: 'Influencers',
-          title: `Influencer Below Target: ${t.influencerName}`,
-          message: `${t.completedVideos}/${t.targetVideos} videos completed (${t.achievementPercent}% achievement)`,
-          actionUrl: '/influencers/targets',
-          date: t.updatedAt ? t.updatedAt.split('T')[0] : todayStr,
-        });
-      }
-    });
+    this.targets
+      .filter(t => t.monthYear === currentMonth)
+      .forEach(t => {
+        if (t.status === 'Below Target') {
+          alerts.push({
+            id: `alt-inf-trg-${t.id}`,
+            type: 'warning',
+            module: 'Influencers',
+            title: `Influencer Below Target: ${t.influencerName}`,
+            message: `${t.completedVideos}/${t.targetVideos} videos completed (${t.achievementPercent}% achievement)`,
+            actionUrl: '/influencers/targets',
+            date: t.updatedAt ? t.updatedAt.split('T')[0] : todayStr,
+          });
+        }
+      });
 
     this.influencers.forEach(i => {
       if (i.status === 'Active' && i.agreementEnd) {

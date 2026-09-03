@@ -18,14 +18,23 @@ import {
 import { store } from '../../services/store';
 import jsPDF from 'jspdf';
 import * as XLSX from 'xlsx';
+import {
+  getCurrentMonthStartDate,
+  getCurrentMonthEndDate,
+  getMonthDateRange,
+  toMonthDisplay,
+  getCurrentMonthKey
+} from '../../utils/budgetUtils';
 
 export const ReportsMasterView: React.FC = () => {
   const [reportType, setReportType] = useState<
     'Influencer' | 'Billboard' | 'LCD Screen' | 'Budget' | 'Payment' | 'Monthly Operations'
   >('Monthly Operations');
 
-  const [startDate, setStartDate] = useState('2026-08-01');
-  const [endDate, setEndDate] = useState('2026-08-31');
+  const [startDate, setStartDate] = useState(getCurrentMonthStartDate());
+  const [endDate, setEndDate] = useState(getCurrentMonthEndDate());
+  const availableMonths = store.getAvailableMonths();
+  const currentMonthKey = getCurrentMonthKey();
 
   // Real-time Firebase data from store
   const influencers = store.getInfluencers();
@@ -302,24 +311,44 @@ export const ReportsMasterView: React.FC = () => {
       </div>
 
       {/* Date Filter Toolbar */}
-      <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between gap-4 text-xs">
-        <div className="flex items-center gap-3">
+      <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
+        <div className="flex flex-wrap items-center gap-3">
           <span className="font-semibold text-slate-300 flex items-center gap-1">
             <Calendar className="w-4 h-4 text-amber-400" /> Reporting Period:
           </span>
-          <input
-            type="date"
-            value={startDate}
-            onChange={e => setStartDate(e.target.value)}
-            className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1 text-white font-mono"
-          />
-          <span className="text-slate-500">to</span>
-          <input
-            type="date"
-            value={endDate}
-            onChange={e => setEndDate(e.target.value)}
-            className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1 text-white font-mono"
-          />
+          <select
+            onChange={e => {
+              if (e.target.value) {
+                const { startDate: s, endDate: eDate } = getMonthDateRange(e.target.value);
+                setStartDate(s);
+                setEndDate(eDate);
+              }
+            }}
+            defaultValue=""
+            className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1 text-white font-semibold focus:outline-none cursor-pointer"
+          >
+            <option value="" disabled>Presets (Select Month)</option>
+            {availableMonths.map(m => (
+              <option key={m} value={m}>
+                {toMonthDisplay(m)} {m === currentMonthKey ? '(Current)' : ''}
+              </option>
+            ))}
+          </select>
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={startDate}
+              onChange={e => setStartDate(e.target.value)}
+              className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1 text-white font-mono"
+            />
+            <span className="text-slate-500">to</span>
+            <input
+              type="date"
+              value={endDate}
+              onChange={e => setEndDate(e.target.value)}
+              className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1 text-white font-mono"
+            />
+          </div>
         </div>
 
         <div className="text-slate-400 font-mono text-[11px]">

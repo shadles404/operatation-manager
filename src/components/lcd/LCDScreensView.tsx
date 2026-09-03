@@ -3,6 +3,7 @@ import { Monitor, Plus, Search, Calendar, ShieldAlert, Edit2, Download, CheckSqu
 import { store } from '../../services/store';
 import { LCDScreen, LCDStatus } from '../../types';
 import * as XLSX from 'xlsx';
+import { getCurrentMonthStartDate, getCurrentMonthEndDate } from '../../utils/budgetUtils';
 
 export const LCDScreensView: React.FC = () => {
   const [search, setSearch] = useState('');
@@ -17,8 +18,8 @@ export const LCDScreensView: React.FC = () => {
   const [videoPlayed, setVideoPlayed] = useState(''); // Video Played
   const [resolution, setResolution] = useState('4K UHD'); // Screen Resolution
   const [rentPrice, setRentPrice] = useState(800); // Price
-  const [agreementStart, setAgreementStart] = useState('2026-08-01'); // Agreement Start Date
-  const [agreementEnd, setAgreementEnd] = useState('2026-09-30'); // Agreement End Date
+  const [agreementStart, setAgreementStart] = useState(getCurrentMonthStartDate()); // Agreement Start Date
+  const [agreementEnd, setAgreementEnd] = useState(getCurrentMonthEndDate()); // Agreement End Date
   const [status, setStatus] = useState<LCDStatus>('Active');
 
   // Hidden / Default form states but kept for model compliance
@@ -27,7 +28,7 @@ export const LCDScreensView: React.FC = () => {
   const [screenSize, setScreenSize] = useState('85 inch');
 
   const lcdScreens = store.getLCDScreens();
-  const today = new Date('2026-08-27');
+  const today = new Date();
 
   const canAdd = store.hasPermission('lcd_screens', 'add');
   const canUpdate = store.hasPermission('lcd_screens', 'update');

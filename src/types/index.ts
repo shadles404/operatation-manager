@@ -240,7 +240,7 @@ export interface Expense {
 }
 
 // Central Payment Ledger Types
-export type CentralPaymentType = 'Influencer' | 'Billboard' | 'LCD Screen' | 'Other Marketing Expense';
+export type CentralPaymentType = 'Influencer' | 'Billboard' | 'LCD Screen' | 'Event' | 'Other Marketing Expense';
 export type CentralPaymentStatus = 'Unpaid' | 'Pending Approval' | 'Approved' | 'Paid';
 
 export interface CentralPayment {

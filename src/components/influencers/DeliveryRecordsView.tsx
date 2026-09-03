@@ -17,6 +17,7 @@ import {
 import { store } from '../../services/store';
 import { DeliveryRecord, DeliveryStatus, DeliveryPaymentStatus } from '../../types';
 import * as XLSX from 'xlsx';
+import { getTodayDate } from '../../utils/budgetUtils';
 
 export const DeliveryRecordsView: React.FC = () => {
   const [search, setSearch] = useState('');
@@ -24,15 +25,18 @@ export const DeliveryRecordsView: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [permissionError, setPermissionError] = useState<string | null>(null);
 
+  const todayStr = getTodayDate();
+  const twoWeeksLater = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];
+
   // New Delivery Form State
   const [influencerId, setInfluencerId] = useState('');
   const [product, setProduct] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [unitPrice, setUnitPrice] = useState(10);
-  const [date, setDate] = useState('2026-08-27');
+  const [date, setDate] = useState(todayStr);
   const [deliveryStatus, setDeliveryStatus] = useState<DeliveryStatus>('Sent');
   const [paymentStatus, setPaymentStatus] = useState<DeliveryPaymentStatus>('Unpaid');
-  const [paymentDueDate, setPaymentDueDate] = useState('2026-09-10');
+  const [paymentDueDate, setPaymentDueDate] = useState(twoWeeksLater);
   const [notes, setNotes] = useState('');
 
   const deliveries = store.getDeliveries();

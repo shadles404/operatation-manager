@@ -96,6 +96,30 @@ export function getSelectableMonths(baseYear = 2026): { key: string; label: stri
 }
 
 /**
+ * Returns the date range for a given monthKey (YYYY-MM), e.g. "2026-09" -> { startDate: "2026-09-01", endDate: "2026-09-30" }
+ */
+export function getMonthDateRange(monthKey?: string): { startDate: string; endDate: string } {
+  const key = toMonthKey(monthKey || getCurrentMonthKey());
+  const [yearStr, monthStr] = key.split('-');
+  const year = parseInt(yearStr, 10) || new Date().getFullYear();
+  const month = parseInt(monthStr, 10) || (new Date().getMonth() + 1);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const monthPad = String(month).padStart(2, '0');
+  return {
+    startDate: `${year}-${monthPad}-01`,
+    endDate: `${year}-${monthPad}-${String(daysInMonth).padStart(2, '0')}`
+  };
+}
+
+export function getCurrentMonthStartDate(): string {
+  return getMonthDateRange(getCurrentMonthKey()).startDate;
+}
+
+export function getCurrentMonthEndDate(): string {
+  return getMonthDateRange(getCurrentMonthKey()).endDate;
+}
+
+/**
  * Format currency with commas and optional cents
  */
 export function formatCurrency(amount: number, showCents = false): string {

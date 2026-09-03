@@ -19,11 +19,15 @@ import { store } from '../../services/store';
 import { CentralPayment, CentralPaymentStatus } from '../../types';
 import jsPDF from 'jspdf';
 import * as XLSX from 'xlsx';
+import { getCurrentMonthKey, toMonthDisplay, toMonthKey } from '../../utils/budgetUtils';
 
 export const InfluencerPaymentsView: React.FC = () => {
+  const currentMonthKey = getCurrentMonthKey();
+  const availableMonths = store.getAvailableMonths();
   const [permissionError, setPermissionError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | CentralPaymentStatus>('All');
+  const [selectedMonth, setSelectedMonth] = useState<string>('All');
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
 
   const payments = store.getPayments().filter(p => p.paymentType === 'Influencer');
@@ -40,16 +44,21 @@ export const InfluencerPaymentsView: React.FC = () => {
 
     const matchesStatus = statusFilter === 'All' || p.status === statusFilter;
 
-    return matchesSearch && matchesStatus;
+    const matchesMonth =
+      selectedMonth === 'All' ||
+      toMonthKey(p.dueDate || '') === selectedMonth ||
+      p.reference.toLowerCase().includes(toMonthDisplay(selectedMonth).toLowerCase());
+
+    return matchesSearch && matchesStatus && matchesMonth;
   });
 
   // KPI Calculations
-  const totalAmount = payments.reduce((sum, p) => sum + p.amount, 0);
-  const paidAmount = payments.filter(p => p.status === 'Paid').reduce((sum, p) => sum + p.amount, 0);
-  const pendingAmount = payments
+  const totalAmount = filtered.reduce((sum, p) => sum + p.amount, 0);
+  const paidAmount = filtered.filter(p => p.status === 'Paid').reduce((sum, p) => sum + p.amount, 0);
+  const pendingAmount = filtered
     .filter(p => p.status === 'Pending Approval' || p.status === 'Approved')
     .reduce((sum, p) => sum + p.amount, 0);
-  const unpaidAmount = payments.filter(p => p.status === 'Unpaid').reduce((sum, p) => sum + p.amount, 0);
+  const unpaidAmount = filtered.filter(p => p.status === 'Unpaid').reduce((sum, p) => sum + p.amount, 0);
 
   const handleUpdateStatus = (payment: CentralPayment, nextStatus: CentralPayment['status']) => {
     if ((nextStatus === 'Approved' || nextStatus === 'Paid') && !canApprove) {
@@ -252,24 +261,43 @@ export const InfluencerPaymentsView: React.FC = () => {
           />
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto">
-          <span className="text-xs text-slate-400 font-medium whitespace-nowrap flex items-center gap-1">
-            <Filter className="w-3.5 h-3.5 text-slate-500" />
-            Status:
-          </span>
-          {(['All', 'Unpaid', 'Pending Approval', 'Approved', 'Paid'] as const).map(tab => (
-            <button
-              key={tab}
-              onClick={() => setStatusFilter(tab)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-                statusFilter === tab
-                  ? 'bg-amber-500 text-slate-950 shadow-sm'
-                  : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
-              }`}
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          {/* Monthly Cycle Selector */}
+          <div className="flex items-center gap-1.5 bg-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-700 text-xs">
+            <Calendar className="w-3.5 h-3.5 text-amber-400" />
+            <select
+              value={selectedMonth}
+              onChange={e => setSelectedMonth(e.target.value)}
+              className="bg-transparent text-white font-semibold focus:outline-none cursor-pointer"
             >
-              {tab}
-            </button>
-          ))}
+              <option value="All" className="bg-slate-900 text-white">All Monthly Cycles</option>
+              {availableMonths.map(m => (
+                <option key={m} value={m} className="bg-slate-900 text-white">
+                  {toMonthDisplay(m)} {m === currentMonthKey ? '★ (Current)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2 overflow-x-auto">
+            <span className="text-xs text-slate-400 font-medium whitespace-nowrap flex items-center gap-1">
+              <Filter className="w-3.5 h-3.5 text-slate-500" />
+              Status:
+            </span>
+            {(['All', 'Unpaid', 'Pending Approval', 'Approved', 'Paid'] as const).map(tab => (
+              <button
+                key={tab}
+                onClick={() => setStatusFilter(tab)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                  statusFilter === tab
+                    ? 'bg-amber-500 text-slate-950 shadow-sm'
+                    : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                }`}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

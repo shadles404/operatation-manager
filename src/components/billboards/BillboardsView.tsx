@@ -18,6 +18,7 @@ import {
 import { store } from '../../services/store';
 import { Billboard, BillboardStatus, BillboardOpStatus } from '../../types';
 import * as XLSX from 'xlsx';
+import { getCurrentMonthStartDate, getCurrentMonthEndDate } from '../../utils/budgetUtils';
 
 export const BillboardsView: React.FC = () => {
   const [search, setSearch] = useState('');
@@ -39,8 +40,8 @@ export const BillboardsView: React.FC = () => {
   const [rentPrice, setRentPrice] = useState(1500);
   const [installationCost, setInstallationCost] = useState(300);
   const [printingCost, setPrintingCost] = useState(400);
-  const [agreementStart, setAgreementStart] = useState('2026-08-01');
-  const [agreementEnd, setAgreementEnd] = useState('2026-09-30');
+  const [agreementStart, setAgreementStart] = useState(getCurrentMonthStartDate());
+  const [agreementEnd, setAgreementEnd] = useState(getCurrentMonthEndDate());
   const [currentProduct, setCurrentProduct] = useState('');
   const [currentCampaign, setCurrentCampaign] = useState('');
   const [status, setStatus] = useState<BillboardStatus>('Active');
@@ -54,7 +55,7 @@ export const BillboardsView: React.FC = () => {
   const canDelete = store.hasPermission('billboards', 'delete');
   const canExport = store.hasPermission('billboards', 'export');
 
-  const today = new Date('2026-08-27');
+  const today = new Date();
 
   const filtered = billboards.filter(b => {
     const matchesSearch =

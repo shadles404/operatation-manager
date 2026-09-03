@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Users,
   Package,
@@ -11,17 +11,27 @@ import {
   Clock,
   ArrowRight,
   Sparkles,
-  FileCheck
+  FileCheck,
+  Calendar
 } from 'lucide-react';
 import { store } from '../../services/store';
 import { NavSelection } from '../common/Sidebar';
-import { getCurrentMonthKey, toMonthDisplay } from '../../utils/budgetUtils';
+import { getCurrentMonthKey, toMonthDisplay, toMonthKey } from '../../utils/budgetUtils';
 
 interface DashboardViewProps {
   onNavigate: (nav: NavSelection) => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
+  const currentMonthKey = getCurrentMonthKey();
+  const [selectedMonth, setSelectedMonth] = useState(currentMonthKey);
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    const unsub = store.subscribe(() => setTick(t => t + 1));
+    return () => unsub();
+  }, []);
+
   const influencers = store.getInfluencers();
   const targets = store.getTargets();
   const deliveries = store.getDeliveries();
@@ -30,23 +40,33 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
   const budgets = store.getBudgets();
   const payments = store.getPayments();
   const alerts = store.getAlerts();
+  const availableMonths = store.getAvailableMonths();
 
-  // Influencer KPI calculations
+  const activeMonthKey = selectedMonth === 'All' ? currentMonthKey : selectedMonth;
+  const activeMonthDisplay = toMonthDisplay(activeMonthKey);
+
+  // Influencer KPI calculations for selected month cycle
   const activeInfluencers = influencers.filter(i => i.status === 'Active').length;
-  const totalTargetVideos = targets.reduce((sum, t) => sum + t.targetVideos, 0);
-  const totalCompletedVideos = targets.reduce((sum, t) => sum + t.completedVideos, 0);
+  const monthTargets = selectedMonth === 'All'
+    ? targets
+    : targets.filter(t => t.monthYear === selectedMonth);
+  const totalTargetVideos = monthTargets.reduce((sum, t) => sum + (Number(t.targetVideos) || 0), 0);
+  const totalCompletedVideos = monthTargets.reduce((sum, t) => sum + (Number(t.completedVideos) || 0), 0);
   const targetAchievement = totalTargetVideos > 0 ? ((totalCompletedVideos / totalTargetVideos) * 100).toFixed(1) : '0';
 
-  // Delivery KPI calculations
-  const totalDeliveries = deliveries.length;
-  const pendingDeliveries = deliveries.filter(d => d.deliveryStatus === 'Pending' || d.deliveryStatus === 'Sent').length;
-  const paidDeliveries = deliveries.filter(d => d.paymentStatus === 'Paid').length;
-  const unpaidDeliveries = deliveries.filter(d => d.paymentStatus === 'Unpaid').length;
-  const pendingDeliveryAmount = deliveries
+  // Delivery KPI calculations for selected month cycle
+  const monthDeliveries = selectedMonth === 'All'
+    ? deliveries
+    : deliveries.filter(d => toMonthKey(d.date) === selectedMonth);
+  const totalDeliveries = monthDeliveries.length;
+  const pendingDeliveries = monthDeliveries.filter(d => d.deliveryStatus === 'Pending' || d.deliveryStatus === 'Sent').length;
+  const paidDeliveries = monthDeliveries.filter(d => d.paymentStatus === 'Paid').length;
+  const unpaidDeliveries = monthDeliveries.filter(d => d.paymentStatus === 'Unpaid').length;
+  const pendingDeliveryAmount = monthDeliveries
     .filter(d => d.paymentStatus === 'Unpaid' || d.paymentStatus === 'Pending Approval')
-    .reduce((sum, d) => sum + d.paymentAmount, 0);
+    .reduce((sum, d) => sum + (Number(d.paymentAmount) || 0), 0);
 
-  // Billboard KPI calculations
+  // Billboard KPI calculations for selected month cycle
   const activeBillboards = billboards.filter(b => b.status === 'Active').length;
   const today = new Date();
   const expiringBillboards = billboards.filter(b => {
@@ -55,12 +75,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
     const diff = Math.ceil((end.getTime() - today.getTime()) / (1000 * 3600 * 24));
     return diff <= 15;
   }).length;
-  const totalBillboardRent = billboards.reduce((sum, b) => sum + b.rentPrice, 0);
+  const totalBillboardRent = billboards.reduce((sum, b) => sum + (Number(b.rentPrice) || 0), 0);
   const unpaidBillboardPayments = payments
-    .filter(p => p.paymentType === 'Billboard' && p.status !== 'Paid')
-    .reduce((sum, p) => sum + p.amount, 0);
+    .filter(p => p.paymentType === 'Billboard' && p.status !== 'Paid' && (selectedMonth === 'All' || toMonthKey(p.dueDate || '') === selectedMonth || p.reference.includes(activeMonthDisplay)))
+    .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
-  // LCD KPI calculations
+  // LCD KPI calculations for selected month cycle
   const activeLCDs = lcdScreens.filter(l => l.status === 'Active').length;
   const expiringLCDs = lcdScreens.filter(l => {
     if (l.status !== 'Active') return false;
@@ -68,16 +88,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
     const diff = Math.ceil((end.getTime() - today.getTime()) / (1000 * 3600 * 24));
     return diff <= 15;
   }).length;
-  const totalLCDRent = lcdScreens.reduce((sum, l) => sum + l.rentPrice, 0);
+  const totalLCDRent = lcdScreens.reduce((sum, l) => sum + (Number(l.rentPrice) || 0), 0);
   const unpaidLCDPayments = payments
-    .filter(p => p.paymentType === 'LCD Screen' && p.status !== 'Paid')
-    .reduce((sum, p) => sum + p.amount, 0);
+    .filter(p => p.paymentType === 'LCD Screen' && p.status !== 'Paid' && (selectedMonth === 'All' || toMonthKey(p.dueDate || '') === selectedMonth || p.reference.includes(activeMonthDisplay)))
+    .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
-  // Real DB Budget KPI calculations (Current Month)
-  const currentMonthKey = getCurrentMonthKey();
-  const currentMonthDisplay = toMonthDisplay(currentMonthKey);
-  const localSummary = store.getBudgetSummary('Local', currentMonthKey);
-  const intlSummary = store.getBudgetSummary('International', currentMonthKey);
+  // Real DB Budget KPI calculations for selected month cycle
+  const localSummary = store.getBudgetSummary('Local', activeMonthKey);
+  const intlSummary = store.getBudgetSummary('International', activeMonthKey);
   const totalAllocated = localSummary.totalBudget + intlSummary.totalBudget;
   const totalSpent = localSummary.spent + intlSummary.spent;
   const totalRemaining = totalAllocated - totalSpent;
@@ -88,18 +106,44 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
       {/* Overview Banner */}
       <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 text-amber-400 font-mono text-xs font-semibold uppercase tracking-wider mb-1">
-            <Sparkles className="w-4 h-4" />
-            <span>{currentMonthDisplay} Executive Summary</span>
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-amber-950/90 text-amber-300 border border-amber-800/80">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>{activeMonthKey === currentMonthKey ? 'Active Monthly Cycle' : 'Historical Cycle'}: {activeMonthDisplay}</span>
+            </span>
+            {activeMonthKey === currentMonthKey && (
+              <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-800/40">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Live Current Month
+              </span>
+            )}
           </div>
           <h1 className="text-2xl font-bold text-white tracking-tight">Marketing Operations Control Center</h1>
-          <p className="text-slate-400 text-xs mt-1">Real-time status tracking across influencers, outdoor media, central payments, & budget allocations.</p>
+          <p className="text-slate-400 text-xs mt-1">Real-time status tracking across influencers, outdoor media, central payments, & continuous budget allocations.</p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Month Cycle Selector */}
+          <div className="flex items-center gap-2 bg-slate-800/90 hover:bg-slate-800 px-3.5 py-2 rounded-xl border border-slate-700 text-xs transition-colors">
+            <Calendar className="w-4 h-4 text-amber-400" />
+            <span className="text-slate-400 font-medium">Cycle:</span>
+            <select
+              value={selectedMonth}
+              onChange={e => setSelectedMonth(e.target.value)}
+              className="bg-transparent text-white font-bold focus:outline-none cursor-pointer pr-1"
+            >
+              {availableMonths.map(m => (
+                <option key={m} value={m} className="bg-slate-900 text-white">
+                  {toMonthDisplay(m)} {m === currentMonthKey ? '★ (Current)' : ''}
+                </option>
+              ))}
+              <option value="All" className="bg-slate-900 text-white">All Months (All-Time View)</option>
+            </select>
+          </div>
+
           <button
             onClick={() => onNavigate({ section: 'Reports', subSection: 'Monthly Operations' })}
-            className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-amber-500/20 flex items-center gap-2 transition-all cursor-pointer"
+            className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-amber-500/20 flex items-center gap-2 transition-all cursor-pointer"
           >
             <FileCheck className="w-4 h-4" />
             <span>Generate Monthly Operations Report</span>
@@ -294,7 +338,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 text-slate-300">
-                {targets.slice(0, 4).map(t => (
+                {monthTargets.slice(0, 4).map(t => (
                   <tr key={t.id} className="hover:bg-slate-800/40">
                     <td className="py-2.5 px-3 font-semibold text-white">{t.influencerName}</td>
                     <td className="py-2.5 px-3 text-center font-mono">{t.targetVideos}</td>
@@ -354,16 +398,32 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
               <thead className="text-[11px] uppercase tracking-wider text-slate-400 bg-slate-800/50 border-b border-slate-800">
                 <tr>
                   <th className="py-2.5 px-3 font-semibold">Ref</th>
+                  <th className="py-2.5 px-3 font-semibold">Type</th>
                   <th className="py-2.5 px-3 font-semibold">Recipient</th>
                   <th className="py-2.5 px-3 font-semibold text-right">Amount</th>
                   <th className="py-2.5 px-3 font-semibold text-right">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 text-slate-300">
-                {payments.slice(0, 4).map(p => (
+                {payments.filter(p => selectedMonth === 'All' || toMonthKey(p.dueDate || '') === selectedMonth || p.reference.includes(activeMonthDisplay) || toMonthKey(p.createdAt || '') === selectedMonth).slice(0, 5).map(p => (
                   <tr key={p.id} className="hover:bg-slate-800/40">
                     <td className="py-2.5 px-3 font-mono text-amber-400 font-semibold">{p.paymentId}</td>
-                    <td className="py-2.5 px-3 text-white truncate max-w-[140px]">{p.recipient}</td>
+                    <td className="py-2.5 px-3">
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                        p.paymentType === 'Event'
+                          ? 'bg-purple-950 text-purple-300'
+                          : p.paymentType === 'Influencer'
+                          ? 'bg-amber-950 text-amber-300'
+                          : p.paymentType === 'Billboard'
+                          ? 'bg-sky-950 text-sky-300'
+                          : p.paymentType === 'LCD Screen'
+                          ? 'bg-indigo-950 text-indigo-300'
+                          : 'bg-slate-800 text-slate-300'
+                      }`}>
+                        {p.paymentType}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-3 text-white truncate max-w-[120px]">{p.recipient}</td>
                     <td className="py-2.5 px-3 text-right font-mono font-bold text-white">${p.amount.toLocaleString()}</td>
                     <td className="py-2.5 px-3 text-right">
                       <span
@@ -372,7 +432,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
                             ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
                             : p.status === 'Approved'
                             ? 'bg-sky-950 text-sky-300 border border-sky-800'
-                            : 'bg-amber-950 text-amber-300 border border-amber-800'
+                            : p.status === 'Pending Approval'
+                            ? 'bg-amber-950 text-amber-300 border border-amber-800'
+                            : 'bg-rose-950 text-rose-300 border border-rose-800'
                         }`}
                       >
                         {p.status}
