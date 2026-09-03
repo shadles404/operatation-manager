@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { CreditCard, Search, ShieldAlert, CheckCircle2, Clock, Filter, FileText, CheckSquare, Square, Trash2, CalendarCheck, Edit2, AlertTriangle, X, HelpCircle, Check } from 'lucide-react';
+import { CreditCard, Search, ShieldAlert, CheckCircle2, Clock, Filter, FileText, CheckSquare, Square, Trash2, CalendarCheck, Edit2, AlertTriangle, X, HelpCircle, Check, Download, FileSpreadsheet } from 'lucide-react';
 import { store } from '../../services/store';
 import { CentralPayment, CentralPaymentStatus } from '../../types';
+import * as XLSX from 'xlsx';
 
 interface PaymentsMasterViewProps {
   initialFilter?: 'All' | 'Pending' | 'Approved' | 'Paid';
@@ -221,6 +222,41 @@ export const PaymentsMasterView: React.FC<PaymentsMasterViewProps> = ({ initialF
 
   const activeSum = getActiveEntitiesSummary();
 
+  const getExportData = () => {
+    return filtered.map(pay => ({
+      'Payment ID': pay.paymentId,
+      'Recipient': pay.recipient,
+      'Type': pay.paymentType,
+      'Reference / Period': pay.reference,
+      'Amount (USD)': pay.amount,
+      'Due Date': pay.dueDate,
+      'Status': pay.status,
+      'Payment Date': pay.paymentDate || 'N/A',
+      'Payment Method': pay.paymentMethod || 'N/A',
+      'Transaction Ref': pay.paymentReference || 'N/A',
+      'Notes': pay.notes || '',
+      'Created Date': pay.createdAt || 'N/A'
+    }));
+  };
+
+  const handleExportExcel = () => {
+    const data = getExportData();
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Central Payments');
+    const dateStr = new Date().toISOString().split('T')[0];
+    XLSX.writeFile(wb, `Central_Payments_${dateStr}.xlsx`);
+  };
+
+  const handleExportCSV = () => {
+    const data = getExportData();
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Central Payments');
+    const dateStr = new Date().toISOString().split('T')[0];
+    XLSX.writeFile(wb, `Central_Payments_${dateStr}.csv`, { bookType: 'csv' });
+  };
+
   return (
     <div className="space-y-6 pb-12">
       {/* Header */}
@@ -233,15 +269,35 @@ export const PaymentsMasterView: React.FC<PaymentsMasterViewProps> = ({ initialF
           <p className="text-xs text-slate-400 mt-0.5">Consolidated cash disbursement control across Influencers, Outdoor Billboards, & LCD venue leases</p>
         </div>
         
-        {canApprove && (
+        <div className="flex items-center gap-2 flex-wrap">
           <button
-            onClick={() => setIsGenerateModalOpen(true)}
-            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-emerald-500/20 flex items-center gap-2 transition-all cursor-pointer shrink-0"
+            onClick={handleExportExcel}
+            className="px-3 py-2 bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-800/80 font-semibold text-xs rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Export to Excel (.xlsx)"
           >
-            <CalendarCheck className="w-4 h-4" />
-            <span>Complete Month Operations</span>
+            <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+            <span>Export Excel</span>
           </button>
-        )}
+
+          <button
+            onClick={handleExportCSV}
+            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Export to CSV (.csv)"
+          >
+            <Download className="w-4 h-4 text-amber-400" />
+            <span>Export CSV</span>
+          </button>
+
+          {canApprove && (
+            <button
+              onClick={() => setIsGenerateModalOpen(true)}
+              className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-emerald-500/20 flex items-center gap-2 transition-all cursor-pointer shrink-0"
+            >
+              <CalendarCheck className="w-4 h-4" />
+              <span>Complete Month Operations</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {permissionError && (

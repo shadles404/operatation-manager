@@ -26,7 +26,7 @@ const MODULE_DEFINITIONS: { id: PermissionModule; label: string; actions: string
   { id: 'lcd_screens', label: 'LCD Screens', actions: ['view', 'add', 'update', 'delete', 'export'] },
   { id: 'lcd_videos', label: 'LCD Videos', actions: ['view', 'add', 'update', 'delete'] },
   { id: 'budget', label: 'Budget & Expenses', actions: ['view', 'add', 'update', 'export'] },
-  { id: 'influencer_payments', label: 'Influencer Payments', actions: ['view', 'approve', 'update'] },
+  { id: 'influencer_payments', label: 'Influencer Payments', actions: ['view', 'approve', 'update', 'export'] },
   { id: 'billboard_payments', label: 'Billboard Payments', actions: ['view', 'approve', 'update'] },
   { id: 'lcd_payments', label: 'LCD Payments', actions: ['view', 'approve', 'update'] },
   { id: 'reports', label: 'Reports & Analytics', actions: ['view', 'export'] },

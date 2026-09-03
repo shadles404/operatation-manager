@@ -28,6 +28,9 @@ import {
   LCDScreen,
   LCDVideo,
   Budget,
+  BudgetType,
+  BudgetCategory,
+  BudgetWarningLevel,
   Expense,
   CentralPayment,
   CentralPaymentStatus,
@@ -38,6 +41,7 @@ import {
   PermissionAction
 } from '../types';
 import { fullAdminPermissions } from '../data/initialData';
+import { toMonthKey, toMonthDisplay, getCurrentMonthKey } from '../utils/budgetUtils';
 
 const STORAGE_KEYS = {
   CURRENT_USER: 'mop_current_user_v2',
@@ -298,18 +302,36 @@ class StoreService {
       };
     });
 
+    // Recalculate Budgets using ONLY real recorded database expenses
+    // Formula: Remaining Budget = Monthly Budget - Actual Recorded Expenses
+    // Local expenses only affect Local Budget; International expenses only affect International Budget.
+    // Expenses are strictly separated by month.
     this.budgets = this.budgets.map(b => {
-      const remaining = b.allocated - b.committed - b.spent;
-      const totalUsed = b.spent + b.committed;
-      const percentUsed = b.allocated > 0 ? (totalUsed / b.allocated) * 100 : 0;
-      let warningLevel = b.warningLevel;
-      if (percentUsed >= 100) warningLevel = 'Exceeded';
-      else if (percentUsed >= 90) warningLevel = 'Critical';
-      else if (percentUsed >= 80) warningLevel = 'Warning';
-      else warningLevel = 'Normal';
+      const bMonthKey = toMonthKey(b.month || b.period || '');
+      const actualSpent = this.expenses
+        .filter(e => e.budgetType === b.budgetType && toMonthKey(e.date) === bMonthKey)
+        .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+
+      const totalBudget = Number(b.totalBudget !== undefined ? b.totalBudget : (b.allocated ?? 0));
+      const remaining = totalBudget - actualSpent;
+      const percentUsed = totalBudget > 0 ? (actualSpent / totalBudget) * 100 : (actualSpent > 0 ? 100 : 0);
+
+      let warningLevel: BudgetWarningLevel = 'Normal';
+      if (totalBudget > 0) {
+        if (percentUsed >= 100) warningLevel = 'Exceeded';
+        else if (percentUsed >= 90) warningLevel = 'Critical';
+        else if (percentUsed >= 80) warningLevel = 'Warning';
+      } else if (actualSpent > 0) {
+        warningLevel = 'Exceeded';
+      }
 
       return {
         ...b,
+        month: bMonthKey,
+        period: b.period || toMonthDisplay(bMonthKey),
+        totalBudget,
+        allocated: totalBudget,
+        spent: actualSpent,
         remaining,
         warningLevel,
       };
@@ -1156,21 +1178,425 @@ class StoreService {
     return { success: true, count: updatedCount };
   }
 
-  // Budget & Expenses
+  // Budget & Expenses Management
   public getBudgets(): Budget[] {
     return this.budgets;
   }
 
+  /**
+   * Retrieves the specific monthly budget for a budget pool (Local or International) and month.
+   */
+  public getMonthlyBudget(budgetType: BudgetType, month: string): Budget | undefined {
+    const monthKey = toMonthKey(month);
+    return this.budgets.find(
+      b => b.budgetType === budgetType && toMonthKey(b.month || b.period || '') === monthKey
+    );
+  }
+
+  /**
+   * Admin sets the monthly total budget separately for Local Budget and International Budget.
+   * Saved and retrieved from Firestore database.
+   */
+  public async setMonthlyBudget(
+    budgetType: BudgetType,
+    month: string,
+    totalBudgetAmount: number
+  ): Promise<{ success: boolean; data?: Budget; error?: string }> {
+    const user = this.getCurrentUser();
+    if (!this.hasPermission('budget', 'update') && user?.role !== 'admin') {
+      return { success: false, error: 'Permission denied: Admin privileges required to set monthly budget' };
+    }
+
+    const monthKey = toMonthKey(month);
+    const period = toMonthDisplay(monthKey);
+    const totalBudget = Math.max(0, Number(totalBudgetAmount) || 0);
+
+    // Calculate actual recorded expenses in DB for this month & pool
+    const spent = this.expenses
+      .filter(e => e.budgetType === budgetType && toMonthKey(e.date) === monthKey)
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+
+    const remaining = totalBudget - spent;
+    const percentUsed = totalBudget > 0 ? (spent / totalBudget) * 100 : (spent > 0 ? 100 : 0);
+
+    let warningLevel: BudgetWarningLevel = 'Normal';
+    if (totalBudget > 0) {
+      if (percentUsed >= 100) warningLevel = 'Exceeded';
+      else if (percentUsed >= 90) warningLevel = 'Critical';
+      else if (percentUsed >= 80) warningLevel = 'Warning';
+    } else if (spent > 0) {
+      warningLevel = 'Exceeded';
+    }
+
+    // Check if a budget record already exists for this type and month
+    const existingIdx = this.budgets.findIndex(
+      b => b.budgetType === budgetType && toMonthKey(b.month || b.period || '') === monthKey
+    );
+
+    const docId = existingIdx !== -1
+      ? this.budgets[existingIdx].id
+      : `bdg_${budgetType.toLowerCase()}_${monthKey}`;
+
+    const budgetRecord: Budget = {
+      id: docId,
+      budgetId: existingIdx !== -1 && this.budgets[existingIdx].budgetId
+        ? this.budgets[existingIdx].budgetId
+        : `BDG-${budgetType.toUpperCase().slice(0, 3)}-${monthKey.replace('-', '')}`,
+      month: monthKey,
+      period,
+      budgetType,
+      totalBudget,
+      allocated: totalBudget,
+      spent,
+      remaining,
+      warningLevel,
+      updatedAt: new Date().toISOString(),
+      updatedBy: user?.fullName || 'Admin',
+      createdAt: existingIdx !== -1 ? this.budgets[existingIdx].createdAt : new Date().toISOString()
+    };
+
+    if (existingIdx !== -1) {
+      this.budgets[existingIdx] = budgetRecord;
+    } else {
+      this.budgets.push(budgetRecord);
+    }
+
+    this.recalculateAll();
+    this.notifyListeners();
+
+    try {
+      await setDoc(doc(db, 'budgets', budgetRecord.id), sanitizeFirestoreData(budgetRecord));
+      this.logAudit(
+        'Set Monthly Budget',
+        'budget',
+        `${budgetType} Budget (${period})`,
+        existingIdx !== -1 ? `$${this.budgets[existingIdx].totalBudget}` : undefined,
+        `Total Budget: $${totalBudget}`
+      );
+      return { success: true, data: budgetRecord };
+    } catch (err: any) {
+      console.error('Error saving monthly budget to Firestore:', err);
+      return { success: false, error: err.message || 'Failed to save monthly budget to database' };
+    }
+  }
+
+  /**
+   * Summary for a budget pool in a given month.
+   * Remaining Budget = Monthly Budget - Actual Recorded Expenses
+   */
+  public getBudgetSummary(budgetType: BudgetType, month: string) {
+    const monthKey = toMonthKey(month);
+    const budgetDoc = this.getMonthlyBudget(budgetType, monthKey);
+    const totalBudget = budgetDoc?.totalBudget !== undefined
+      ? budgetDoc.totalBudget
+      : (budgetDoc?.allocated ?? 0);
+
+    // Sum of only actual recorded expenses in DB for this month & pool
+    const matchingExpenses = this.expenses.filter(
+      e => e.budgetType === budgetType && toMonthKey(e.date) === monthKey
+    );
+    const spent = matchingExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+    const remaining = totalBudget - spent;
+    const utilization = totalBudget > 0 ? Math.round((spent / totalBudget) * 100) : 0;
+
+    let warningLevel: BudgetWarningLevel = 'Normal';
+    if (totalBudget > 0) {
+      if (utilization >= 100) warningLevel = 'Exceeded';
+      else if (utilization >= 90) warningLevel = 'Critical';
+      else if (utilization >= 80) warningLevel = 'Warning';
+    } else if (spent > 0) {
+      warningLevel = 'Exceeded';
+    }
+
+    return {
+      totalBudget,
+      spent,
+      remaining,
+      utilization,
+      warningLevel,
+      budgetDoc,
+      expenseCount: matchingExpenses.length,
+      hasBudgetConfigured: budgetDoc !== undefined && totalBudget > 0
+    };
+  }
+
+  /**
+   * Retrieves all available categories for a budget pool (standard + custom)
+   */
+  public getCategories(budgetType: BudgetType, month?: string): string[] {
+    const defaults = ['Influencers', 'Billboards', 'LCD Screens', 'Other'];
+    const monthKey = month ? toMonthKey(month) : getCurrentMonthKey();
+    const budgetDoc = this.getMonthlyBudget(budgetType, monthKey);
+
+    const customFromBudget = budgetDoc?.customCategories || [];
+    const allocKeys = Object.keys(budgetDoc?.categoryAllocations || {});
+    const poolExpenses = this.expenses.filter(e => e.budgetType === budgetType);
+    const fromExpenses = poolExpenses.map(e => e.category);
+
+    const storedKey = `custom_categories_${budgetType.toLowerCase()}`;
+    const storedCategories: string[] = loadItem(storedKey, []);
+
+    const combined = Array.from(new Set([
+      ...defaults,
+      ...customFromBudget,
+      ...allocKeys,
+      ...fromExpenses,
+      ...storedCategories
+    ])).filter(Boolean);
+
+    return combined;
+  }
+
+  /**
+   * Category breakdown for a budget pool in a given month.
+   * Categories: Influencers, Billboards, LCD Screens, Other, plus custom categories.
+   */
+  public getCategoryBreakdown(budgetType: BudgetType, month: string) {
+    const monthKey = toMonthKey(month);
+    const summary = this.getBudgetSummary(budgetType, monthKey);
+    const poolExpenses = this.expenses.filter(
+      e => e.budgetType === budgetType && toMonthKey(e.date) === monthKey
+    );
+
+    const categories = this.getCategories(budgetType, monthKey);
+    const allocations = summary.budgetDoc?.categoryAllocations || {};
+
+    const breakdown: Record<string, {
+      spent: number;
+      count: number;
+      targetAllocation: number;
+      shareOfExpenses: number;
+      shareOfBudget: number;
+      allocationUtilization: number;
+    }> = {};
+
+    categories.forEach(cat => {
+      const catExpenses = poolExpenses.filter(e => e.category === cat);
+      const spent = catExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+      const count = catExpenses.length;
+      const targetAllocation = allocations[cat] || 0;
+      const shareOfExpenses = summary.spent > 0 ? Math.round((spent / summary.spent) * 100) : 0;
+      const shareOfBudget = summary.totalBudget > 0 ? Math.round((spent / summary.totalBudget) * 100) : 0;
+      const allocationUtilization = targetAllocation > 0 ? Math.round((spent / targetAllocation) * 100) : 0;
+
+      breakdown[cat] = {
+        spent,
+        count,
+        targetAllocation,
+        shareOfExpenses,
+        shareOfBudget,
+        allocationUtilization
+      };
+    });
+
+    return breakdown;
+  }
+
+  /**
+   * Admin sets category target allocations for a month.
+   */
+  public async setCategoryAllocations(
+    budgetType: BudgetType,
+    month: string,
+    allocations: Record<string, number>
+  ): Promise<{ success: boolean; error?: string }> {
+    const user = this.getCurrentUser();
+    if (!this.hasPermission('budget', 'update') && user?.role !== 'admin') {
+      return { success: false, error: 'Permission denied: Admin privileges required to update categories' };
+    }
+
+    const monthKey = toMonthKey(month);
+    let budgetDoc = this.getMonthlyBudget(budgetType, monthKey);
+
+    if (!budgetDoc) {
+      const sumAllocations = Object.values(allocations).reduce((sum, v) => sum + (Number(v) || 0), 0);
+      const res = await this.setMonthlyBudget(budgetType, monthKey, sumAllocations);
+      if (!res.success || !res.data) {
+        return { success: false, error: res.error || 'Failed to initialize monthly budget' };
+      }
+      budgetDoc = res.data;
+    }
+
+    const updatedDoc: Budget = {
+      ...budgetDoc,
+      categoryAllocations: allocations,
+      updatedAt: new Date().toISOString(),
+      updatedBy: user?.fullName || 'Admin'
+    };
+
+    const idx = this.budgets.findIndex(b => b.id === updatedDoc.id);
+    if (idx !== -1) {
+      this.budgets[idx] = updatedDoc;
+    } else {
+      this.budgets.push(updatedDoc);
+    }
+
+    this.recalculateAll();
+    this.notifyListeners();
+
+    try {
+      await setDoc(doc(db, 'budgets', updatedDoc.id), sanitizeFirestoreData(updatedDoc));
+      this.logAudit('Updated Category Allocations', 'budget', `${budgetType} Budget (${toMonthDisplay(monthKey)})`);
+      return { success: true };
+    } catch (err: any) {
+      console.error('Error saving category allocations to Firestore:', err);
+      return { success: false, error: err.message || 'Failed to save to database' };
+    }
+  }
+
+  /**
+   * Admin adds a new custom category.
+   */
+  public async addCustomCategory(
+    budgetType: BudgetType,
+    categoryName: string,
+    month?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    const user = this.getCurrentUser();
+    if (!this.hasPermission('budget', 'update') && user?.role !== 'admin') {
+      return { success: false, error: 'Permission denied: Admin privileges required to add categories' };
+    }
+
+    const name = categoryName.trim();
+    if (!name) return { success: false, error: 'Category name cannot be empty' };
+
+    const storedKey = `custom_categories_${budgetType.toLowerCase()}`;
+    const stored: string[] = loadItem(storedKey, []);
+    if (!stored.includes(name)) {
+      stored.push(name);
+      saveItem(storedKey, stored);
+    }
+
+    if (month) {
+      const monthKey = toMonthKey(month);
+      const budgetDoc = this.getMonthlyBudget(budgetType, monthKey);
+      if (budgetDoc) {
+        const customCategories = Array.from(new Set([...(budgetDoc.customCategories || []), name]));
+        const updatedDoc = { ...budgetDoc, customCategories };
+        const idx = this.budgets.findIndex(b => b.id === updatedDoc.id);
+        if (idx !== -1) this.budgets[idx] = updatedDoc;
+        await setDoc(doc(db, 'budgets', updatedDoc.id), sanitizeFirestoreData(updatedDoc)).catch(e => console.error(e));
+      }
+    }
+
+    this.notifyListeners();
+    this.logAudit('Added Expense Category', 'budget', `${budgetType}: ${name}`);
+    return { success: true };
+  }
+
+  /**
+   * Admin renames/updates an existing category.
+   */
+  public async renameCategory(
+    budgetType: BudgetType,
+    oldName: string,
+    newName: string,
+    month?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    const user = this.getCurrentUser();
+    if (!this.hasPermission('budget', 'update') && user?.role !== 'admin') {
+      return { success: false, error: 'Permission denied: Admin privileges required to edit categories' };
+    }
+
+    const target = newName.trim();
+    if (!target) return { success: false, error: 'New category name cannot be empty' };
+
+    const storedKey = `custom_categories_${budgetType.toLowerCase()}`;
+    let stored: string[] = loadItem(storedKey, []);
+    stored = stored.map(c => c === oldName ? target : c);
+    saveItem(storedKey, stored);
+
+    // Update matching expenses in memory and Firestore
+    const affectedExpenses = this.expenses.filter(e => e.budgetType === budgetType && e.category === oldName);
+    for (const exp of affectedExpenses) {
+      exp.category = target;
+      await setDoc(doc(db, 'expenses', exp.id), sanitizeFirestoreData(exp)).catch(e => console.error(e));
+    }
+
+    // Update budget categoryAllocations and customCategories
+    for (const b of this.budgets.filter(b => b.budgetType === budgetType)) {
+      let changed = false;
+      if (b.categoryAllocations && b.categoryAllocations[oldName] !== undefined) {
+        b.categoryAllocations[target] = b.categoryAllocations[oldName];
+        delete b.categoryAllocations[oldName];
+        changed = true;
+      }
+      if (b.customCategories && b.customCategories.includes(oldName)) {
+        b.customCategories = b.customCategories.map(c => c === oldName ? target : c);
+        changed = true;
+      }
+      if (changed) {
+        await setDoc(doc(db, 'budgets', b.id), sanitizeFirestoreData(b)).catch(e => console.error(e));
+      }
+    }
+
+    this.recalculateAll();
+    this.notifyListeners();
+    this.logAudit('Renamed Expense Category', 'budget', `${budgetType}: ${oldName} -> ${target}`);
+    return { success: true };
+  }
+
+  /**
+   * Admin deletes a custom category.
+   */
+  public async deleteCategory(
+    budgetType: BudgetType,
+    categoryName: string
+  ): Promise<{ success: boolean; error?: string }> {
+    const user = this.getCurrentUser();
+    if (!this.hasPermission('budget', 'update') && user?.role !== 'admin') {
+      return { success: false, error: 'Permission denied: Admin privileges required to delete categories' };
+    }
+
+    if (['Influencers', 'Billboards', 'LCD Screens', 'Other'].includes(categoryName)) {
+      return { success: false, error: 'Cannot delete standard system category' };
+    }
+
+    const storedKey = `custom_categories_${budgetType.toLowerCase()}`;
+    let stored: string[] = loadItem(storedKey, []);
+    stored = stored.filter(c => c !== categoryName);
+    saveItem(storedKey, stored);
+
+    for (const b of this.budgets.filter(b => b.budgetType === budgetType)) {
+      let changed = false;
+      if (b.customCategories && b.customCategories.includes(categoryName)) {
+        b.customCategories = b.customCategories.filter(c => c !== categoryName);
+        changed = true;
+      }
+      if (b.categoryAllocations && b.categoryAllocations[categoryName] !== undefined) {
+        delete b.categoryAllocations[categoryName];
+        changed = true;
+      }
+      if (changed) {
+        await setDoc(doc(db, 'budgets', b.id), sanitizeFirestoreData(b)).catch(e => console.error(e));
+      }
+    }
+
+    this.notifyListeners();
+    this.logAudit('Deleted Expense Category', 'budget', `${budgetType}: ${categoryName}`);
+    return { success: true };
+  }
+
   public addBudget(bdg: Omit<Budget, 'id' | 'createdAt' | 'remaining' | 'warningLevel'>): { success: boolean; data?: Budget; error?: string } {
-    if (!this.hasPermission('budget', 'add')) {
+    if (!this.hasPermission('budget', 'add') && !this.hasPermission('budget', 'update')) {
       return { success: false, error: 'Permission denied: Cannot add budget allocation' };
     }
-    const remaining = bdg.allocated - bdg.committed - bdg.spent;
+    const monthKey = toMonthKey(bdg.month || bdg.period);
+    const totalBudget = Number(bdg.totalBudget ?? bdg.allocated ?? 0);
+    const spent = this.expenses
+      .filter(e => e.budgetType === bdg.budgetType && toMonthKey(e.date) === monthKey)
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+    const remaining = totalBudget - spent;
     const newBdg: Budget = {
       ...bdg,
       id: `bdg-${Date.now()}`,
+      month: monthKey,
+      period: bdg.period || toMonthDisplay(monthKey),
+      totalBudget,
+      allocated: totalBudget,
+      spent,
       remaining,
-      warningLevel: 'Normal',
+      warningLevel: totalBudget > 0 && spent >= totalBudget ? 'Exceeded' : 'Normal',
       createdAt: new Date().toISOString()
     };
     this.budgets.push(newBdg);
@@ -1190,23 +1616,20 @@ class StoreService {
     if (idx === -1) return { success: false, error: 'Budget not found' };
 
     const oldVal = this.budgets[idx];
-    const updated = { ...oldVal, ...updates };
+    const totalBudget = updates.totalBudget !== undefined
+      ? Number(updates.totalBudget)
+      : (updates.allocated !== undefined ? Number(updates.allocated) : oldVal.totalBudget ?? oldVal.allocated);
+
+    const updated = {
+      ...oldVal,
+      ...updates,
+      totalBudget,
+      allocated: totalBudget
+    };
     this.budgets[idx] = updated;
     setDoc(doc(db, 'budgets', id), sanitizeFirestoreData(updated)).catch(e => console.error(e));
 
-    // Propagate category name change to linked expenses
-    if (updates.category && updates.category !== oldVal.category) {
-      this.expenses = this.expenses.map(exp => {
-        if (exp.category === oldVal.category && exp.budgetType === oldVal.budgetType) {
-          const updatedExp = { ...exp, category: updates.category! };
-          setDoc(doc(db, 'expenses', exp.id), sanitizeFirestoreData(updatedExp)).catch(e => console.error(e));
-          return updatedExp;
-        }
-        return exp;
-      });
-    }
-
-    this.logAudit('Updated Budget Allocation', 'budget', updated.budgetId, `Allocated: $${oldVal.allocated}, Category: ${oldVal.category}`, `Allocated: $${updated.allocated}, Category: ${updated.category}`);
+    this.logAudit('Updated Budget Allocation', 'budget', updated.budgetId, `Allocated: $${oldVal.allocated}`, `Allocated: $${updated.allocated}`);
     this.recalculateAll();
     this.notifyListeners();
     return { success: true, data: updated };
@@ -1228,109 +1651,174 @@ class StoreService {
     return { success: true };
   }
 
+  // Expenses Management — Marketing Expense Ledger
   public getExpenses(): Expense[] {
     return this.expenses;
   }
 
-  public addExpense(exp: Omit<Expense, 'id' | 'createdAt' | 'expenseId'>): { success: boolean; data?: Expense; error?: string } {
-    if (!this.hasPermission('expenses', 'add')) {
+  /**
+   * Log Marketing Expense
+   * Records an actual marketing expenditure, saves it to Firestore,
+   * and immediately recalculates the affected budget.
+   */
+  public async addExpense(exp: {
+    budgetType: BudgetType;
+    category: BudgetCategory;
+    description: string;
+    amount: number;
+    date: string;
+    notes?: string;
+    requestedBy?: string;
+    paymentStatus?: Expense['paymentStatus'];
+  }): Promise<{ success: boolean; data?: Expense; error?: string }> {
+    if (!this.hasPermission('expenses', 'add') && !this.hasPermission('budget', 'add')) {
       return { success: false, error: 'Permission denied: Cannot add expense' };
     }
-    const expenseId = `EXP-${Math.floor(100 + Math.random()*900)}`;
+
+    const user = this.getCurrentUser();
+    const expenseId = `EXP-${Math.floor(1000 + Math.random() * 9000)}`;
     const newExp: Expense = {
-      ...exp,
-      id: `exp-${Date.now()}`,
+      id: `exp-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       expenseId,
+      budgetType: exp.budgetType,
+      category: exp.category,
+      description: exp.description.trim(),
+      amount: Math.max(0, Number(exp.amount) || 0),
+      currency: 'USD',
+      date: exp.date,
+      notes: exp.notes ? exp.notes.trim() : '',
+      requestedBy: exp.requestedBy || user?.fullName || 'Marketing Team',
+      paymentStatus: exp.paymentStatus || 'Paid',
       createdAt: new Date().toISOString()
     };
-    this.expenses.push(newExp);
-    setDoc(doc(db, 'expenses', newExp.id), sanitizeFirestoreData(newExp)).catch(e => console.error(e));
 
-    if (newExp.paymentStatus === 'Approved' || newExp.paymentStatus === 'Paid') {
-      const bIdx = this.budgets.findIndex(b => b.category === newExp.category && b.budgetType === newExp.budgetType);
-      if (bIdx !== -1) {
-        this.budgets[bIdx].spent += newExp.amount;
-        setDoc(doc(db, 'budgets', this.budgets[bIdx].id), sanitizeFirestoreData(this.budgets[bIdx])).catch(e => console.error(e));
-      }
-    }
-
-    const newPay: CentralPayment = {
-      id: `pay-${Date.now()}`,
-      paymentId: expenseId,
-      paymentType: 'Other Marketing Expense',
-      recipient: newExp.requestedBy,
-      reference: expenseId,
-      amount: newExp.amount,
-      currency: newExp.currency,
-      dueDate: newExp.date,
-      status: newExp.paymentStatus,
-      relatedEntityId: newExp.id,
-      budgetType: newExp.budgetType,
-      notes: newExp.description,
-      createdAt: new Date().toISOString()
-    };
-    this.payments.push(newPay);
-    setDoc(doc(db, 'payments', newPay.id), sanitizeFirestoreData(newPay)).catch(e => console.error(e));
-
-    this.logAudit('Recorded Marketing Expense', 'expenses', expenseId, undefined, `Amount: $${newExp.amount}, Category: ${newExp.category}`);
+    // Update state immediately
+    this.expenses.unshift(newExp);
     this.recalculateAll();
     this.notifyListeners();
-    return { success: true, data: newExp };
+
+    try {
+      await setDoc(doc(db, 'expenses', newExp.id), sanitizeFirestoreData(newExp));
+
+      // Sync the affected monthly budget document in Firestore
+      const monthKey = toMonthKey(newExp.date);
+      const budgetDoc = this.budgets.find(
+        b => b.budgetType === newExp.budgetType && toMonthKey(b.month || b.period || '') === monthKey
+      );
+      if (budgetDoc) {
+        await setDoc(doc(db, 'budgets', budgetDoc.id), sanitizeFirestoreData(budgetDoc));
+      }
+
+      this.logAudit(
+        'Recorded Marketing Expense',
+        'expenses',
+        expenseId,
+        undefined,
+        `Amount: $${newExp.amount}, Category: ${newExp.category}, Pool: ${newExp.budgetType}`
+      );
+      return { success: true, data: newExp };
+    } catch (err: any) {
+      console.error('Error saving expense to Firestore:', err);
+      return { success: false, error: err.message || 'Failed to save expense to database' };
+    }
   }
 
-  public updateExpense(id: string, updates: Partial<Expense>): { success: boolean; data?: Expense; error?: string } {
-    if (!this.hasPermission('expenses', 'update')) {
+  /**
+   * Updates an expense record and recalculates all budget balances.
+   */
+  public async updateExpense(
+    id: string,
+    updates: Partial<Expense>
+  ): Promise<{ success: boolean; data?: Expense; error?: string }> {
+    if (!this.hasPermission('expenses', 'update') && !this.hasPermission('budget', 'update')) {
       return { success: false, error: 'Permission denied: Cannot update expense' };
     }
     const idx = this.expenses.findIndex(e => e.id === id);
     if (idx === -1) return { success: false, error: 'Expense not found' };
 
     const oldVal = this.expenses[idx];
-    const updated = { ...oldVal, ...updates };
+    const updated: Expense = {
+      ...oldVal,
+      ...updates,
+      amount: updates.amount !== undefined ? Math.max(0, Number(updates.amount)) : oldVal.amount
+    };
+
     this.expenses[idx] = updated;
-    setDoc(doc(db, 'expenses', id), sanitizeFirestoreData(updated)).catch(e => console.error(e));
-
-    if (oldVal.paymentStatus !== updated.paymentStatus && (updated.paymentStatus === 'Approved' || updated.paymentStatus === 'Paid')) {
-      const bIdx = this.budgets.findIndex(b => b.category === updated.category && b.budgetType === updated.budgetType);
-      if (bIdx !== -1) {
-        this.budgets[bIdx].spent += updated.amount;
-        setDoc(doc(db, 'budgets', this.budgets[bIdx].id), sanitizeFirestoreData(this.budgets[bIdx])).catch(e => console.error(e));
-      }
-    }
-
-    this.logAudit('Updated Expense Record', 'expenses', updated.expenseId, `Status: ${oldVal.paymentStatus}`, `Status: ${updated.paymentStatus}`);
     this.recalculateAll();
     this.notifyListeners();
-    return { success: true, data: updated };
+
+    try {
+      await setDoc(doc(db, 'expenses', id), sanitizeFirestoreData(updated));
+
+      // Sync affected monthly budgets in Firestore
+      const affectedMonths = Array.from(new Set([toMonthKey(oldVal.date), toMonthKey(updated.date)]));
+      const affectedPools = Array.from(new Set([oldVal.budgetType, updated.budgetType]));
+      for (const m of affectedMonths) {
+        for (const p of affectedPools) {
+          const budgetDoc = this.budgets.find(
+            b => b.budgetType === p && toMonthKey(b.month || b.period || '') === m
+          );
+          if (budgetDoc) {
+            await setDoc(doc(db, 'budgets', budgetDoc.id), sanitizeFirestoreData(budgetDoc));
+          }
+        }
+      }
+
+      this.logAudit(
+        'Updated Expense Record',
+        'expenses',
+        updated.expenseId,
+        `Amount: $${oldVal.amount}, Category: ${oldVal.category}`,
+        `Amount: $${updated.amount}, Category: ${updated.category}`
+      );
+      return { success: true, data: updated };
+    } catch (err: any) {
+      console.error('Error updating expense in Firestore:', err);
+      return { success: false, error: err.message || 'Failed to update expense' };
+    }
   }
 
-  public deleteExpense(id: string): { success: boolean; error?: string } {
-    if (!this.hasPermission('expenses', 'delete')) {
+  /**
+   * Deletes an expense and returns the deleted amount to the available budget.
+   */
+  public async deleteExpense(id: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.hasPermission('expenses', 'delete') && !this.hasPermission('budget', 'delete')) {
       return { success: false, error: 'Permission denied: Cannot delete expense' };
     }
     const exp = this.expenses.find(e => e.id === id);
     if (!exp) return { success: false, error: 'Expense not found' };
 
     this.expenses = this.expenses.filter(e => e.id !== id);
-    deleteDoc(doc(db, 'expenses', id)).catch(e => console.error(e));
-
-    const toRemovePays = this.payments.filter(p => p.relatedEntityId === id || p.reference === exp.expenseId);
-    this.payments = this.payments.filter(p => p.relatedEntityId !== id && p.reference !== exp.expenseId);
-    toRemovePays.forEach(p => deleteDoc(doc(db, 'payments', p.id)).catch(e => console.error(e)));
-
-    this.logAudit('Deleted Expense Record', 'expenses', exp.expenseId);
     this.recalculateAll();
     this.notifyListeners();
-    return { success: true };
+
+    try {
+      await deleteDoc(doc(db, 'expenses', id));
+
+      // Sync affected monthly budget in Firestore
+      const monthKey = toMonthKey(exp.date);
+      const budgetDoc = this.budgets.find(
+        b => b.budgetType === exp.budgetType && toMonthKey(b.month || b.period || '') === monthKey
+      );
+      if (budgetDoc) {
+        await setDoc(doc(db, 'budgets', budgetDoc.id), sanitizeFirestoreData(budgetDoc));
+      }
+
+      this.logAudit('Deleted Expense Record', 'expenses', exp.expenseId, `Returned $${exp.amount} to ${exp.budgetType} Budget`);
+      return { success: true };
+    } catch (err: any) {
+      console.error('Error deleting expense from Firestore:', err);
+      return { success: false, error: err.message || 'Failed to delete expense' };
+    }
   }
 
   public async bulkDeleteExpenses(ids: string[]): Promise<{ success: boolean; count: number; error?: string }> {
-    if (!this.hasPermission('expenses', 'delete')) {
+    if (!this.hasPermission('expenses', 'delete') && !this.hasPermission('budget', 'delete')) {
       return { success: false, count: 0, error: 'Permission denied: Cannot delete expense' };
     }
     let deletedCount = 0;
     for (const id of ids) {
-      const res = this.deleteExpense(id);
+      const res = await this.deleteExpense(id);
       if (res.success) deletedCount++;
     }
     this.logAudit('Bulk Deleted Expenses', 'expenses', `${deletedCount} expense records deleted`);
@@ -1338,12 +1826,12 @@ class StoreService {
   }
 
   public async bulkUpdateExpenseStatus(ids: string[], paymentStatus: Expense['paymentStatus']): Promise<{ success: boolean; count: number; error?: string }> {
-    if (!this.hasPermission('expenses', 'update')) {
+    if (!this.hasPermission('expenses', 'update') && !this.hasPermission('budget', 'update')) {
       return { success: false, count: 0, error: 'Permission denied: Cannot update expense' };
     }
     let updatedCount = 0;
     for (const id of ids) {
-      const res = this.updateExpense(id, { paymentStatus });
+      const res = await this.updateExpense(id, { paymentStatus });
       if (res.success) updatedCount++;
     }
     this.logAudit('Bulk Updated Expense Status', 'expenses', `${updatedCount} records set to ${paymentStatus}`);

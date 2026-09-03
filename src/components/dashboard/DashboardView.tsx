@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { store } from '../../services/store';
 import { NavSelection } from '../common/Sidebar';
+import { getCurrentMonthKey, toMonthDisplay } from '../../utils/budgetUtils';
 
 interface DashboardViewProps {
   onNavigate: (nav: NavSelection) => void;
@@ -47,7 +48,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
 
   // Billboard KPI calculations
   const activeBillboards = billboards.filter(b => b.status === 'Active').length;
-  const today = new Date('2026-08-27');
+  const today = new Date();
   const expiringBillboards = billboards.filter(b => {
     if (b.status !== 'Active') return false;
     const end = new Date(b.agreementEnd);
@@ -72,13 +73,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
     .filter(p => p.paymentType === 'LCD Screen' && p.status !== 'Paid')
     .reduce((sum, p) => sum + p.amount, 0);
 
-  // Budget KPI calculations
-  const localBudget = budgets.filter(b => b.budgetType === 'Local').reduce((sum, b) => sum + b.allocated, 0);
-  const intlBudget = budgets.filter(b => b.budgetType === 'International').reduce((sum, b) => sum + b.allocated, 0);
-  const totalAllocated = budgets.reduce((sum, b) => sum + b.allocated, 0);
-  const totalSpent = budgets.reduce((sum, b) => sum + b.spent, 0);
-  const totalCommitted = budgets.reduce((sum, b) => sum + b.committed, 0);
-  const totalRemaining = budgets.reduce((sum, b) => sum + b.remaining, 0);
+  // Real DB Budget KPI calculations (Current Month)
+  const currentMonthKey = getCurrentMonthKey();
+  const currentMonthDisplay = toMonthDisplay(currentMonthKey);
+  const localSummary = store.getBudgetSummary('Local', currentMonthKey);
+  const intlSummary = store.getBudgetSummary('International', currentMonthKey);
+  const totalAllocated = localSummary.totalBudget + intlSummary.totalBudget;
+  const totalSpent = localSummary.spent + intlSummary.spent;
+  const totalRemaining = totalAllocated - totalSpent;
+  const totalCommitted = 0;
 
   return (
     <div className="space-y-6 pb-12">
@@ -87,7 +90,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
         <div>
           <div className="flex items-center gap-2 text-amber-400 font-mono text-xs font-semibold uppercase tracking-wider mb-1">
             <Sparkles className="w-4 h-4" />
-            <span>August 2026 Executive Summary</span>
+            <span>{currentMonthDisplay} Executive Summary</span>
           </div>
           <h1 className="text-2xl font-bold text-white tracking-tight">Marketing Operations Control Center</h1>
           <p className="text-slate-400 text-xs mt-1">Real-time status tracking across influencers, outdoor media, central payments, & budget allocations.</p>

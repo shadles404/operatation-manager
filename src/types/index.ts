@@ -189,21 +189,27 @@ export interface LCDVideo {
 
 // Budget & Expenses Types
 export type BudgetType = 'Local' | 'International';
-export type BudgetCategory = string;
+export type BudgetCategory = 'Influencers' | 'Billboards' | 'LCD Screens' | 'Other' | string;
 
 export type BudgetWarningLevel = 'Normal' | 'Warning' | 'Critical' | 'Exceeded';
 
 export interface Budget {
   id: string;
   budgetId: string;
-  period: string; // e.g. "August 2026" or "2026-Q3"
+  month?: string; // normalized e.g. "2026-09"
+  period: string; // e.g. "September 2026"
   budgetType: BudgetType;
-  category: BudgetCategory;
-  allocated: number;
-  committed: number;
-  spent: number;
-  remaining: number; // calculated: allocated - committed - spent
+  category?: BudgetCategory;
+  totalBudget?: number; // admin configured monthly total budget
+  allocated: number; // monthly total budget
+  categoryAllocations?: Record<string, number>; // optional target allocation per category
+  customCategories?: string[]; // custom categories configured for this pool/month
+  committed?: number;
+  spent: number; // dynamically computed from actual recorded expenses in this month
+  remaining: number; // Monthly Budget - Actual Recorded Expenses
   warningLevel: BudgetWarningLevel;
+  updatedBy?: string;
+  updatedAt?: string;
   createdAt: string;
 }
 
@@ -212,7 +218,7 @@ export type ExpensePaymentStatus = 'Unpaid' | 'Pending Approval' | 'Approved' | 
 export interface Expense {
   id: string;
   expenseId: string;
-  date: string;
+  date: string; // YYYY-MM-DD
   category: BudgetCategory;
   budgetType: BudgetType;
   amount: number;
